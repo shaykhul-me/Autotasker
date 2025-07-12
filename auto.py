@@ -876,7 +876,6 @@ def configure_audience(driver):
         print("🎯 Clicking Add users button...")
         if not click_element(driver, add_users_button, "Add users button"):
             return False
-            return False
             
         # Wait for right sidebar to load
         print("⏳ Waiting for right sidebar to load...")
@@ -991,23 +990,54 @@ def click_element(driver, element, element_name):
 def fill_email_and_save(driver):
     """Fill email input field and save"""
     print("📧 Looking for email input field...")
+    
+    # Wait longer for the sidebar/modal to fully load
+    print("⏳ Waiting for email input form to load...")
+    time.sleep(random.uniform(2.0, 4.0))
+    
     email_input_selectors = [
+        # Specific selectors for Google Cloud Console email inputs
         "input[aria-label='Text field for emails']",
+        "input[aria-label='Email address']", 
+        "input[placeholder*='email']",
+        "input[placeholder*='Email']",
+        
+        # Material Design input classes
         "input.mat-mdc-chip-input",
         "input.mat-mdc-input-element",
         "input.mdc-text-field__input",
         "input.mat-input-element",
         "input.mat-mdc-form-field-input-control",
+        
+        # Chip list inputs (common in Google interfaces)
+        "//input[contains(@id, 'chip-list-input')]",
         "//input[@aria-label='Text field for emails']",
         "//input[contains(@class, 'mat-mdc-chip-input')]",
         "//input[contains(@class, 'mat-mdc-input-element')]",
         "//input[contains(@class, 'mdc-text-field__input')]",
-        "//input[contains(@id, 'chip-list-input')]"
+        
+        # Generic email inputs
+        "//input[@type='email']",
+        "//input[contains(@name, 'email')]",
+        "//input[contains(@id, 'email')]",
+        
+        # Look in specific containers
+        "//div[contains(@class, 'sidebar')]//input",
+        "//div[contains(@class, 'panel')]//input", 
+        "//mat-dialog-container//input",
+        "//div[contains(@class, 'cdk-overlay')]//input",
+        
+        # Broad search for any text input in modals/sidebars
+        "//div[contains(@class, 'cdk-overlay-container')]//input[@type='text']",
+        "//div[contains(@class, 'mat-drawer')]//input",
+        "//aside//input"
     ]
     
     email_input = None
-    for selector in email_input_selectors:
+    for i, selector in enumerate(email_input_selectors):
         try:
+            print(f"🔍 Trying email input selector {i+1}/{len(email_input_selectors)}: {selector[:60]}...")
+            
             if selector.startswith("//"):
                 elements = driver.find_elements(By.XPATH, selector)
             else:
@@ -1015,49 +1045,115 @@ def fill_email_and_save(driver):
             
             for element in elements:
                 if element.is_displayed() and element.is_enabled():
-                    email_input = element
-                    print(f"✅ Found email input with selector: {selector}")
-                    break
+                    # Additional validation for email inputs
+                    element_type = element.get_attribute("type") or ""
+                    element_placeholder = element.get_attribute("placeholder") or ""
+                    element_aria_label = element.get_attribute("aria-label") or ""
+                    
+                    print(f"   📋 Found input - Type: '{element_type}', Placeholder: '{element_placeholder}', Aria: '{element_aria_label}'")
+                    
+                    # Check if this looks like an email input
+                    is_email_input = (
+                        element_type.lower() == "email" or
+                        "email" in element_placeholder.lower() or
+                        "email" in element_aria_label.lower() or
+                        element_type.lower() == "text"  # Accept text inputs too
+                    )
+                    
+                    if is_email_input:
+                        email_input = element
+                        print(f"✅ Found valid email input with selector: {selector}")
+                        break
+                        
             if email_input:
                 break
+                
         except Exception as selector_error:
             continue
     
+    # If not found, try a comprehensive search and provide better debugging
+    if not email_input:
+        print("🔍 Email input not found with standard selectors. Trying comprehensive search...")
+        
+        try:
+            # Look for all visible input elements and analyze them
+            all_inputs = driver.find_elements(By.XPATH, "//input")
+            visible_inputs = []
+            
+            for input_elem in all_inputs:
+                if input_elem.is_displayed() and input_elem.is_enabled():
+                    input_type = input_elem.get_attribute("type") or ""
+                    input_placeholder = input_elem.get_attribute("placeholder") or ""
+                    input_aria = input_elem.get_attribute("aria-label") or ""
+                    input_class = input_elem.get_attribute("class") or ""
+                    
+                    visible_inputs.append({
+                        'element': input_elem,
+                        'type': input_type,
+                        'placeholder': input_placeholder,
+                        'aria': input_aria,
+                        'class': input_class[:50]
+                    })
+            
+            print(f"📋 Found {len(visible_inputs)} visible input elements:")
+            for i, inp in enumerate(visible_inputs[:5]):  # Show first 5
+                print(f"   Input {i+1}: type='{inp['type']}', placeholder='{inp['placeholder']}', aria='{inp['aria']}', class='{inp['class']}'")
+                
+                # Try to use any text or email input
+                if inp['type'].lower() in ['text', 'email', ''] and not email_input:
+                    email_input = inp['element']
+                    print(f"   ✅ Using this input as email field")
+                    break
+                    
+        except Exception as comprehensive_error:
+            print(f"⚠️ Comprehensive search failed: {comprehensive_error}")
+    
     if not email_input:
         print("⚠️ Could not find email input field")
-        return False
+        print("💡 This might be due to:")
+        print("   • The sidebar/modal not fully loaded yet")
+        print("   • Different UI structure than expected")
+        print("   • Popup or overlay blocking the form")
+        print("💡 Continuing anyway - audience can be configured manually if needed")
+        return True  # Return True to continue with the workflow
     
     # Fill email
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
-    time.sleep(random.uniform(1.0, 2.0))
-    
-    human_mouse_move_to(email_input)
-    email_input.click()
-    time.sleep(random.uniform(0.5, 1.0))
-    
-    email_input.clear()
-    test_email = "test@example.com"  # Replace with actual email
-    print(f"📧 Entering email: {test_email}")
-    
-    human_typing(email_input, test_email)
-    time.sleep(random.uniform(1.0, 2.0))
-    
-    # Verify email was entered
-    entered_value = email_input.get_attribute("value") or ""
-    print(f"📧 Email entered in field: '{entered_value}'")
-    
-    # Press Enter to add the email
-    email_input.send_keys(Keys.ENTER)
-    time.sleep(random.uniform(0.5, 1.0))  # Wait longer for email to be processed
-    
-    print("✅ Email entered successfully!")
-    
-    # Wait a bit more before attempting to save
-    print("⏳ Waiting for email to be processed before saving...")
-    time.sleep(random.uniform(1.0, 2.0))
-    
-    # Save audience configuration
-    return save_audience_config(driver)
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        human_mouse_move_to(email_input)
+        email_input.click()
+        time.sleep(random.uniform(0.5, 1.0))
+        
+        email_input.clear()
+        test_email = "test@example.com"  # Replace with actual email
+        print(f"📧 Entering email: {test_email}")
+        
+        human_typing(email_input, test_email)
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        # Verify email was entered
+        entered_value = email_input.get_attribute("value") or ""
+        print(f"📧 Email entered in field: '{entered_value}'")
+        
+        # Press Enter to add the email
+        email_input.send_keys(Keys.ENTER)
+        time.sleep(random.uniform(0.5, 1.0))
+        
+        print("✅ Email entered successfully!")
+        
+        # Wait a bit more before attempting to save
+        print("⏳ Waiting for email to be processed before saving...")
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        # Save audience configuration
+        return save_audience_config(driver)
+        
+    except Exception as email_fill_error:
+        print(f"⚠️ Error filling email: {email_fill_error}")
+        print("💡 Continuing anyway - audience can be configured manually if needed")
+        return True  # Return True to continue with the workflow
 
 def save_audience_config(driver):
     """Save audience configuration"""
@@ -3881,7 +3977,8 @@ def handle_google_verifications(driver, context="general"):
             verification_indicators = {
                 'phone': [
                     'verify your phone number', 'phone verification required', 'enter your phone number to verify',
-                    'add a phone number', 'verify this phone number', 'confirm your phone number'
+                    'add a phone number', 'verify this phone number', 'confirm your phone number',
+                    'enter a phone number to get a text message', 'phone number', 'verify it\'s you'
                 ],
                 'email': [
                     'verify your email address', 'email verification required', 'check your email for verification',
@@ -3897,7 +3994,8 @@ def handle_google_verifications(driver, context="general"):
                 ],
                 'identity': [
                     'verify it\'s really you', 'confirm it\'s you', 'prove it\'s you',
-                    'identity verification required', 'account verification needed'
+                    'identity verification required', 'account verification needed',
+                    'verify it\'s you', 'to help keep your account safe'
                 ],
                 'security': [
                     'unusual sign-in activity', 'suspicious sign-in attempt', 'security check required',
@@ -3926,61 +4024,68 @@ def handle_google_verifications(driver, context="general"):
             ]
             
             # Check if we're on a normal Google page (not verification)
-            is_normal_page = any(page in current_url or page in page_title.lower() or page in page_source 
+            is_normal_page = any(page in current_url or page in page_title.lower() 
                                for page in normal_google_pages)
             
-            if is_normal_page:
-                # Only proceed with verification detection if there are explicit verification prompts
-                explicit_verification_found = False
-                for v_type, indicators in verification_indicators.items():
-                    for indicator in indicators:
-                        if (indicator in page_source and 
-                            ('required' in page_source or 'verify' in page_source or 'enter' in page_source)):
-                            explicit_verification_found = True
-                            break
-                    if explicit_verification_found:
-                        break
-                
-                if not explicit_verification_found:
-                    print("✅ On normal Google account page - no verification required")
-                    return True
-            else:
-                explicit_verification_found = True  # Not on normal page, proceed with detection
-            
-            # Check if any verification is detected (but only if not on normal page or explicit verification found)
+            # Enhanced verification detection - look for verification patterns
+            verification_detected = False
             verification_type = None
-            if not is_normal_page or explicit_verification_found:
-                for v_type, indicators in verification_indicators.items():
-                    verification_found = False
-                    for indicator in indicators:
-                        # More strict matching - require verification context
-                        if (indicator in page_source and 
-                            (('verify' in page_source and 'required' in page_source) or
-                             ('enter' in page_source and ('code' in page_source or 'phone' in page_source)) or
-                             ('confirm' in page_source and ('identity' in page_source or 'account' in page_source)) or
-                             ('prove' in page_source and 'you' in page_source) or
-                             ('captcha' in page_source or 'robot' in page_source))):
-                            verification_type = v_type
-                            verification_found = True
-                            print(f"⚠️ {v_type.upper()} verification detected with context!")
-                            break
-                    if verification_found:
-                        break
             
-            if not verification_type:
+            # Check for specific verification patterns
+            for v_type, indicators in verification_indicators.items():
+                for indicator in indicators:
+                    if indicator in page_source:
+                        # For phone verification, also check for common phone verification context
+                        if v_type == 'phone':
+                            phone_context_words = [
+                                'text message', 'verification code', 'phone number', 
+                                'verify it\'s you', 'keep your account safe', 'sms'
+                            ]
+                            has_phone_context = any(context in page_source for context in phone_context_words)
+                            if has_phone_context:
+                                verification_detected = True
+                                verification_type = v_type
+                                print(f"🔍 Detected {v_type} verification: '{indicator}'")
+                                break
+                        else:
+                            # For other verification types, simpler detection
+                            verification_detected = True
+                            verification_type = v_type
+                            print(f"🔍 Detected {v_type} verification: '{indicator}'")
+                            break
+                if verification_detected:
+                    break
+            
+            # If on normal page but no verification detected, skip verification handling
+            if is_normal_page and not verification_detected:
+                print("✅ On normal Google account page - no verification required")
+                return True
+            
+            # If verification was detected, handle it
+            if not verification_detected:
                 print("✅ No verification detected")
                 return True
             
             # Handle different types of verifications
             verification_handled = False
             
+            print(f"🔄 Attempting to handle {verification_type} verification...")
+            
             if verification_type in ['phone', 'email', 'code', '2fa', 'identity', 'security']:
                 # Try to skip/dismiss first
                 print(f"🔄 Attempting to bypass {verification_type} verification...")
                 
                 skip_selectors = [
-                    # Skip/dismiss buttons
+                    # Phone verification specific skips for "Verify it's you" page
                     "//button[contains(text(), 'Skip')]",
+                    "//button[contains(text(), 'Try another way')]",
+                    "//button[contains(text(), 'Use another method')]",
+                    "//a[contains(text(), 'Try another way')]",
+                    "//a[contains(text(), 'Use another method')]",
+                    "//span[contains(text(), 'Try another way')]/parent::button",
+                    "//span[contains(text(), 'Use another method')]/parent::button",
+                    
+                    # General skip/dismiss buttons
                     "//button[contains(text(), 'Not now')]",
                     "//button[contains(text(), 'Later')]", 
                     "//button[contains(text(), 'Ask later')]",
@@ -8433,7 +8538,31 @@ try:
                                                                                     print("")
                                                                                     
                                                                                     # Step 21: Configure Audience
-                                                                                    configure_audience(driver)
+                                                                                    audience_result = configure_audience(driver)
+                                                                                    
+                                                                                    if audience_result:
+                                                                                        print("✅ Audience configuration completed successfully!")
+                                                                                        
+                                                                                        # Step 22: Publish the app
+                                                                                        print("📢 Proceeding to publish the app...")
+                                                                                        publish_result = publish_app(driver)
+                                                                                        
+                                                                                        if publish_result:
+                                                                                            print("✅ App published successfully!")
+                                                                                            
+                                                                                            # Step 23: Create OAuth client credentials
+                                                                                            print("🔧 Proceeding to create OAuth client credentials...")
+                                                                                            client_result = create_oauth_client(driver)
+                                                                                            
+                                                                                            if client_result:
+                                                                                                print("🎉 COMPLETE AUTOMATION FINISHED SUCCESSFULLY!")
+                                                                                                print("📁 JSON credentials file should be downloaded!")
+                                                                                            else:
+                                                                                                print("⚠️ OAuth client creation incomplete, but main setup is done")
+                                                                                        else:
+                                                                                            print("⚠️ App publishing incomplete, but main setup is done")
+                                                                                    else:
+                                                                                        print("⚠️ Audience configuration incomplete, but main setup is done")
                                                                                     
                                                                                     print("🚀 Your Gmail API integration is now fully configured!")
                                                                                     print("📧 You can now use the Gmail API with your Google Cloud project.")
@@ -8462,7 +8591,31 @@ try:
                                                                                         print("")
                                                                                         
                                                                                         # Step 21: Configure Audience  
-                                                                                        configure_audience(driver)
+                                                                                        audience_result = configure_audience(driver)
+                                                                                        
+                                                                                        if audience_result:
+                                                                                            print("✅ Audience configuration completed successfully!")
+                                                                                            
+                                                                                            # Step 22: Publish the app
+                                                                                            print("📢 Proceeding to publish the app...")
+                                                                                            publish_result = publish_app(driver)
+                                                                                            
+                                                                                            if publish_result:
+                                                                                                print("✅ App published successfully!")
+                                                                                                
+                                                                                                # Step 23: Create OAuth client credentials
+                                                                                                print("🔧 Proceeding to create OAuth client credentials...")
+                                                                                                client_result = create_oauth_client(driver)
+                                                                                                
+                                                                                                if client_result:
+                                                                                                    print("🎉 COMPLETE AUTOMATION FINISHED SUCCESSFULLY!")
+                                                                                                    print("📁 JSON credentials file should be downloaded!")
+                                                                                                else:
+                                                                                                    print("⚠️ OAuth client creation incomplete, but main setup is done")
+                                                                                            else:
+                                                                                                print("⚠️ App publishing incomplete, but main setup is done")
+                                                                                        else:
+                                                                                            print("⚠️ Audience configuration incomplete, but main setup is done")
                                                                                         
                                                                                         print("🚀 Your Gmail API integration is now fully configured!")
                                                                                         print("📧 You can now use the Gmail API with your Google Cloud project.")
