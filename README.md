@@ -387,6 +387,6 @@ A: Yes, it uses legitimate Google APIs and follows automation best practices.
 
 ---
 
-**Made with ❤️ by [Your Name]**
+**Made with ❤️ by [Shaykhul]**
 
 > ⚠️ **Disclaimer**: This tool is for educational and legitimate automation purposes only. Users are responsible for complying with Google's Terms of Service and applicable laws.
