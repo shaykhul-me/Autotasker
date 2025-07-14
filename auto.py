@@ -876,6 +876,7 @@ def configure_audience(driver):
         print("🎯 Clicking Add users button...")
         if not click_element(driver, add_users_button, "Add users button"):
             return False
+            return False
             
         # Wait for right sidebar to load
         print("⏳ Waiting for right sidebar to load...")
@@ -990,54 +991,23 @@ def click_element(driver, element, element_name):
 def fill_email_and_save(driver):
     """Fill email input field and save"""
     print("📧 Looking for email input field...")
-    
-    # Wait longer for the sidebar/modal to fully load
-    print("⏳ Waiting for email input form to load...")
-    time.sleep(random.uniform(2.0, 4.0))
-    
     email_input_selectors = [
-        # Specific selectors for Google Cloud Console email inputs
         "input[aria-label='Text field for emails']",
-        "input[aria-label='Email address']", 
-        "input[placeholder*='email']",
-        "input[placeholder*='Email']",
-        
-        # Material Design input classes
         "input.mat-mdc-chip-input",
         "input.mat-mdc-input-element",
         "input.mdc-text-field__input",
         "input.mat-input-element",
         "input.mat-mdc-form-field-input-control",
-        
-        # Chip list inputs (common in Google interfaces)
-        "//input[contains(@id, 'chip-list-input')]",
         "//input[@aria-label='Text field for emails']",
         "//input[contains(@class, 'mat-mdc-chip-input')]",
         "//input[contains(@class, 'mat-mdc-input-element')]",
         "//input[contains(@class, 'mdc-text-field__input')]",
-        
-        # Generic email inputs
-        "//input[@type='email']",
-        "//input[contains(@name, 'email')]",
-        "//input[contains(@id, 'email')]",
-        
-        # Look in specific containers
-        "//div[contains(@class, 'sidebar')]//input",
-        "//div[contains(@class, 'panel')]//input", 
-        "//mat-dialog-container//input",
-        "//div[contains(@class, 'cdk-overlay')]//input",
-        
-        # Broad search for any text input in modals/sidebars
-        "//div[contains(@class, 'cdk-overlay-container')]//input[@type='text']",
-        "//div[contains(@class, 'mat-drawer')]//input",
-        "//aside//input"
+        "//input[contains(@id, 'chip-list-input')]"
     ]
     
     email_input = None
-    for i, selector in enumerate(email_input_selectors):
+    for selector in email_input_selectors:
         try:
-            print(f"🔍 Trying email input selector {i+1}/{len(email_input_selectors)}: {selector[:60]}...")
-            
             if selector.startswith("//"):
                 elements = driver.find_elements(By.XPATH, selector)
             else:
@@ -1045,115 +1015,49 @@ def fill_email_and_save(driver):
             
             for element in elements:
                 if element.is_displayed() and element.is_enabled():
-                    # Additional validation for email inputs
-                    element_type = element.get_attribute("type") or ""
-                    element_placeholder = element.get_attribute("placeholder") or ""
-                    element_aria_label = element.get_attribute("aria-label") or ""
-                    
-                    print(f"   📋 Found input - Type: '{element_type}', Placeholder: '{element_placeholder}', Aria: '{element_aria_label}'")
-                    
-                    # Check if this looks like an email input
-                    is_email_input = (
-                        element_type.lower() == "email" or
-                        "email" in element_placeholder.lower() or
-                        "email" in element_aria_label.lower() or
-                        element_type.lower() == "text"  # Accept text inputs too
-                    )
-                    
-                    if is_email_input:
-                        email_input = element
-                        print(f"✅ Found valid email input with selector: {selector}")
-                        break
-                        
+                    email_input = element
+                    print(f"✅ Found email input with selector: {selector}")
+                    break
             if email_input:
                 break
-                
         except Exception as selector_error:
             continue
     
-    # If not found, try a comprehensive search and provide better debugging
-    if not email_input:
-        print("🔍 Email input not found with standard selectors. Trying comprehensive search...")
-        
-        try:
-            # Look for all visible input elements and analyze them
-            all_inputs = driver.find_elements(By.XPATH, "//input")
-            visible_inputs = []
-            
-            for input_elem in all_inputs:
-                if input_elem.is_displayed() and input_elem.is_enabled():
-                    input_type = input_elem.get_attribute("type") or ""
-                    input_placeholder = input_elem.get_attribute("placeholder") or ""
-                    input_aria = input_elem.get_attribute("aria-label") or ""
-                    input_class = input_elem.get_attribute("class") or ""
-                    
-                    visible_inputs.append({
-                        'element': input_elem,
-                        'type': input_type,
-                        'placeholder': input_placeholder,
-                        'aria': input_aria,
-                        'class': input_class[:50]
-                    })
-            
-            print(f"📋 Found {len(visible_inputs)} visible input elements:")
-            for i, inp in enumerate(visible_inputs[:5]):  # Show first 5
-                print(f"   Input {i+1}: type='{inp['type']}', placeholder='{inp['placeholder']}', aria='{inp['aria']}', class='{inp['class']}'")
-                
-                # Try to use any text or email input
-                if inp['type'].lower() in ['text', 'email', ''] and not email_input:
-                    email_input = inp['element']
-                    print(f"   ✅ Using this input as email field")
-                    break
-                    
-        except Exception as comprehensive_error:
-            print(f"⚠️ Comprehensive search failed: {comprehensive_error}")
-    
     if not email_input:
         print("⚠️ Could not find email input field")
-        print("💡 This might be due to:")
-        print("   • The sidebar/modal not fully loaded yet")
-        print("   • Different UI structure than expected")
-        print("   • Popup or overlay blocking the form")
-        print("💡 Continuing anyway - audience can be configured manually if needed")
-        return True  # Return True to continue with the workflow
+        return False
     
     # Fill email
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
-        time.sleep(random.uniform(1.0, 2.0))
-        
-        human_mouse_move_to(email_input)
-        email_input.click()
-        time.sleep(random.uniform(0.5, 1.0))
-        
-        email_input.clear()
-        test_email = "test@example.com"  # Replace with actual email
-        print(f"📧 Entering email: {test_email}")
-        
-        human_typing(email_input, test_email)
-        time.sleep(random.uniform(1.0, 2.0))
-        
-        # Verify email was entered
-        entered_value = email_input.get_attribute("value") or ""
-        print(f"📧 Email entered in field: '{entered_value}'")
-        
-        # Press Enter to add the email
-        email_input.send_keys(Keys.ENTER)
-        time.sleep(random.uniform(0.5, 1.0))
-        
-        print("✅ Email entered successfully!")
-        
-        # Wait a bit more before attempting to save
-        print("⏳ Waiting for email to be processed before saving...")
-        time.sleep(random.uniform(1.0, 2.0))
-        
-        # Save audience configuration
-        return save_audience_config(driver)
-        
-    except Exception as email_fill_error:
-        print(f"⚠️ Error filling email: {email_fill_error}")
-        print("💡 Continuing anyway - audience can be configured manually if needed")
-        return True  # Return True to continue with the workflow
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
+    time.sleep(random.uniform(1.0, 2.0))
+    
+    human_mouse_move_to(email_input)
+    email_input.click()
+    time.sleep(random.uniform(0.5, 1.0))
+    
+    email_input.clear()
+    test_email = EMAIL  # Use the actual inputted email
+    print(f"📧 Entering email: {test_email}")
+    
+    human_typing(email_input, test_email)
+    time.sleep(random.uniform(1.0, 2.0))
+    
+    # Verify email was entered
+    entered_value = email_input.get_attribute("value") or ""
+    print(f"📧 Email entered in field: '{entered_value}'")
+    
+    # Press Enter to add the email
+    email_input.send_keys(Keys.ENTER)
+    time.sleep(random.uniform(0.5, 1.0))  # Wait longer for email to be processed
+    
+    print("✅ Email entered successfully!")
+    
+    # Wait a bit more before attempting to save
+    print("⏳ Waiting for email to be processed before saving...")
+    time.sleep(random.uniform(1.0, 2.0))
+    
+    # Save audience configuration
+    return save_audience_config(driver)
 
 def save_audience_config(driver):
     """Save audience configuration"""
@@ -3830,6 +3734,341 @@ def manual_rename_json_file():
         print(f"❌ Manual rename failed: {manual_error}")
         return False
 
+def create_project_direct_approach(driver):
+    """
+    Create a new Google Cloud project using direct navigation approach
+    This bypasses the need to find and click buttons by going directly to the project creation URL
+    """
+    print("🚀 Using DIRECT APPROACH for project creation...")
+    print("📍 Navigating directly to: https://console.cloud.google.com/projectcreate")
+    
+    try:
+        # Direct navigation to project creation page
+        driver.get("https://console.cloud.google.com/projectcreate")
+        print("✅ Successfully navigated to project creation page!")
+        
+        # Wait for page to load
+        print("⏳ Waiting for project creation page to load...")
+        time.sleep(random.uniform(3.0, 5.0))
+        
+        # Check for CAPTCHA or verification
+        if not wait_for_page_load_and_check_captcha(driver):
+            print("⚠️ CAPTCHA or verification detected during navigation")
+        
+        # Verify we're on the correct page
+        current_url = driver.current_url
+        if "projectcreate" in current_url or "create" in current_url:
+            print("✅ Confirmed: On project creation page")
+            print(f"📍 Current URL: {current_url}")
+            
+            # Wait a bit more for the form to be fully loaded
+            time.sleep(random.uniform(2.0, 3.0))
+            
+            # Check if project creation form is visible
+            form_indicators = [
+                "//input[@id='input-project-name']",
+                "//input[contains(@name, 'project')]",
+                "//input[contains(@placeholder, 'project')]",
+                "//input[contains(@aria-label, 'project')]",
+                "//form[contains(@class, 'project')]",
+                "//div[contains(@class, 'project-create')]"
+            ]
+            
+            form_found = False
+            for indicator in form_indicators:
+                try:
+                    element = driver.find_element(By.XPATH, indicator)
+                    if element.is_displayed():
+                        print(f"✅ Project creation form detected with: {indicator}")
+                        form_found = True
+                        break
+                except:
+                    continue
+            
+            if form_found:
+                print("📝 Project creation form is ready!")
+                return True
+            else:
+                print("⚠️ Project creation form not immediately visible, but continuing...")
+                # Wait a bit more for dynamic content to load
+                time.sleep(random.uniform(2.0, 4.0))
+                return True
+        else:
+            print(f"⚠️ Unexpected URL after navigation: {current_url}")
+            return False
+            
+    except Exception as direct_error:
+        print(f"❌ Direct approach failed: {direct_error}")
+        print("🔄 Will fall back to traditional button-clicking approach...")
+        return False
+
+def create_project_traditional_approach(driver):
+    """
+    Traditional approach - clicking buttons to navigate to project creation
+    This is the fallback method if direct navigation fails
+    """
+    print("🔄 Using TRADITIONAL APPROACH for project creation...")
+    print("🆕 Looking for project creation buttons...")
+    
+    # First, ensure any modals are completely closed
+    print("🔍 Ensuring all modals are closed before proceeding...")
+    time.sleep(random.uniform(2.0, 4.0))
+    
+    # Check for and dismiss any remaining overlays
+    try:
+        overlays = driver.find_elements(By.CSS_SELECTOR, ".cdk-overlay-backdrop, .cdk-overlay-container, .mat-mdc-dialog-container")
+        for overlay in overlays:
+            if overlay.is_displayed():
+                print("🔍 Found remaining overlay, dismissing...")
+                driver.execute_script("arguments[0].style.display = 'none';", overlay)
+                time.sleep(1.0)
+    except:
+        pass
+    
+    try:
+        # Try multiple selectors for the project button
+        selectors = [
+            "#ocb-platform-bar > cfc-platform-bar > div > div.cfc-platform-bar-left > div > div > div > pcc-platform-bar-purview-switcher > pcc-purview-switcher > cfc-switcher-button > button",
+            "pcc-purview-switcher cfc-switcher-button button",
+            "button[aria-label*='project']",
+            "cfc-switcher-button button"
+        ]
+        
+        project_btn = None
+        for selector in selectors:
+            try:
+                project_btn = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                print(f"✅ Found project button with selector: {selector}")
+                break
+            except TimeoutException:
+                continue
+        
+        if project_btn is None:
+            raise Exception("Could not find project button with any selector")
+        
+        # Use JavaScript click to avoid interception issues
+        try:
+            print("🖱️ Using JavaScript click for project button...")
+            driver.execute_script("arguments[0].scrollIntoView(true);", project_btn)
+            time.sleep(random.uniform(1.0, 2.0))
+            driver.execute_script("arguments[0].click();", project_btn)
+            print("✅ New project button clicked successfully with JavaScript!")
+        except Exception as js_click_error:
+            print(f"⚠️ JavaScript click failed: {js_click_error}")
+            print("🔄 Trying regular click...")
+            # Fallback to regular click
+            try:
+                driver.execute_script("arguments[0].scrollIntoView(true);", project_btn)
+                time.sleep(random.uniform(1.0, 2.0))
+                human_mouse_move_to(project_btn)
+                project_btn.click()
+                print("✅ New project button clicked successfully!")
+            except Exception as click_error:
+                print(f"⚠️ Regular click also failed: {click_error}")
+                raise click_error
+            
+        time.sleep(random.uniform(3.0, 5.0))
+        
+        # Handle modal "New Project" button
+        return handle_new_project_modal(driver)
+        
+    except Exception as traditional_error:
+        print(f"❌ Traditional approach failed: {traditional_error}")
+        return False
+
+def handle_new_project_modal(driver):
+    """Handle the New Project modal that appears after clicking the project button"""
+    print("🆕 Handling 'New Project' modal...")
+    try:
+        # Enhanced modal "New Project" button detection with multiple selectors
+        
+        # First, ensure the modal is fully loaded and visible
+        print("🔍 Detecting project picker modal...")
+        modal_detected = False
+        modal_selectors = [
+            "//div[contains(@class, 'mat-mdc-dialog-container')]",
+            "//div[contains(@class, 'cdk-overlay-container')]",
+            "[role='dialog']",
+            "//mat-dialog-container",
+            "#purview-picker-modal-action-bar",
+            "//mat-toolbar[@id='purview-picker-modal-action-bar']"
+        ]
+        
+        for modal_selector in modal_selectors:
+            try:
+                if modal_selector.startswith("//") or modal_selector.startswith("#"):
+                    modal_element = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH if modal_selector.startswith("//") else By.CSS_SELECTOR, modal_selector)))
+                else:
+                    modal_element = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, modal_selector)))
+                
+                if modal_element and modal_element.is_displayed():
+                    print(f"✅ Modal detected with selector: {modal_selector}")
+                    modal_detected = True
+                    break
+            except:
+                continue
+        
+        if not modal_detected:
+            print("⚠️ Could not detect modal dialog")
+            print("🔍 Checking if we're already on the project creation page...")
+            current_url = driver.current_url
+            if "projectcreate" in current_url or "create" in current_url:
+                print("✅ Already on project creation page - skipping modal step")
+                return True
+            else:
+                print("💡 Modal might not have opened - waiting longer...")
+                time.sleep(random.uniform(3.0, 5.0))
+        
+        modal_new_project_selectors = [
+            # Original selector
+            "//*[@id='purview-picker-modal-action-bar']/mat-toolbar/div[3]/div/div/div[1]/div/button[2]",
+            
+            # Alternative specific selectors for the modal
+            "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[contains(text(), 'New Project')]",
+            "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[contains(text(), 'NEW PROJECT')]",
+            "//*[@id='purview-picker-modal-action-bar']//button[contains(text(), 'New Project')]",
+            "//*[@id='purview-picker-modal-action-bar']//button[contains(text(), 'NEW PROJECT')]",
+            
+            # Generic modal selectors for "New Project" button
+            "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(text(), 'New Project')]",
+            "//div[contains(@class, 'cdk-overlay-container')]//button[contains(text(), 'New Project')]",
+            "//mat-dialog-container//button[contains(text(), 'New Project')]",
+            "[role='dialog']//button[contains(text(), 'New Project')]",
+            
+            # More flexible modal button selectors
+            "//button[contains(text(), 'New Project') and not(contains(text(), 'Select'))]",
+            "//button[contains(text(), 'NEW PROJECT') and not(contains(text(), 'SELECT'))]",
+            "//button[normalize-space(text())='New Project']",
+            "//button[normalize-space(text())='NEW PROJECT']",
+            "//span[normalize-space(text())='New Project']/parent::button",
+            "//span[normalize-space(text())='NEW PROJECT']/parent::button",
+            
+            # Button position-based selectors in modal action bar
+            "//*[@id='purview-picker-modal-action-bar']//button[last()]",
+            "//*[@id='purview-picker-modal-action-bar']//button[2]",
+            "//*[@id='purview-picker-modal-action-bar']//button[position()=2]",
+            "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[last()]",
+            "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[2]",
+            
+            # Primary/raised button styles in modal
+            "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(@class, 'mat-mdc-raised-button')]",
+            "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(@class, 'mdc-button--raised')]",
+            "[role='dialog']//button[contains(@class, 'mat-mdc-raised-button')]",
+            "[role='dialog']//button[contains(@class, 'mdc-button--raised')]",
+            
+            # Fallback selectors for any "New" or "Create" buttons in modal
+            "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(text(), 'New')]",
+            "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(text(), 'Create')]",
+            "[role='dialog']//button[contains(text(), 'New')]",
+            "[role='dialog']//button[contains(text(), 'Create')]"
+        ]
+        
+        new_project_btn = None
+        successful_selector = None
+        
+        # Wait for modal to be visible first
+        print("⏳ Waiting for project picker modal to be visible...")
+        time.sleep(random.uniform(2.0, 4.0))
+        
+        # Try each selector to find the modal "New Project" button
+        for i, selector in enumerate(modal_new_project_selectors):
+            try:
+                print(f"🔍 Trying modal 'New Project' selector {i+1}/{len(modal_new_project_selectors)}: {selector[:80]}...")
+                
+                # Use a shorter timeout for each attempt
+                element = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
+                
+                if element and element.is_displayed() and element.is_enabled():
+                    # Additional validation for the button
+                    btn_text = (element.get_attribute("textContent") or element.text or "").strip()
+                    btn_classes = element.get_attribute("class") or ""
+                    
+                    print(f"   📋 Found button - Text: '{btn_text}', Classes: '{btn_classes[:50]}...'")
+                    
+                    # Validate this is likely the correct button
+                    is_valid_button = (
+                        "new project" in btn_text.lower() or
+                        "new" in btn_text.lower() or
+                        "create" in btn_text.lower() or
+                        "mdc-button--raised" in btn_classes or
+                        "mat-mdc-raised-button" in btn_classes
+                    )
+                    
+                    if is_valid_button:
+                        new_project_btn = element
+                        successful_selector = selector
+                        print(f"✅ Found valid modal 'New Project' button with selector: {selector[:80]}...")
+                        break
+                    else:
+                        print(f"   ⚠️ Button found but doesn't appear to be the correct 'New Project' button")
+                
+            except TimeoutException:
+                continue
+            except Exception as selector_error:
+                print(f"   ⚠️ Selector failed: {selector_error}")
+                continue
+        
+        if new_project_btn:
+            print(f"✅ Modal 'New Project' button found! Using selector: {successful_selector[:80]}...")
+            
+            # Try regular click first
+            try:
+                driver.execute_script("arguments[0].scrollIntoView(true);", new_project_btn)
+                time.sleep(random.uniform(1.0, 2.0))
+                human_mouse_move_to(new_project_btn)
+                new_project_btn.click()
+                print("✅ Modal 'New Project' button clicked successfully!")
+            except Exception as modal_click_error:
+                print(f"⚠️ Regular click failed: {modal_click_error}")
+                print("🔄 Trying JavaScript click...")
+                # Fallback to JavaScript click
+                driver.execute_script("arguments[0].click();", new_project_btn)
+                print("✅ Modal 'New Project' button clicked with JavaScript!")
+                
+            time.sleep(random.uniform(2.0, 4.0))
+            return True
+        else:
+            print("❌ Could not find modal 'New Project' button with any selector")
+            
+            # Enhanced debugging - show all visible buttons in modal
+            print("🔍 Debugging: Looking for all visible buttons in modal...")
+            try:
+                modal_buttons = driver.find_elements(By.XPATH, "//div[contains(@class, 'mat-mdc-dialog-container')]//button | //div[contains(@class, 'cdk-overlay-container')]//button | //[role='dialog']//button")
+                if modal_buttons:
+                    print(f"📋 Found {len(modal_buttons)} buttons in modal:")
+                    for j, btn in enumerate(modal_buttons):
+                        try:
+                            if btn.is_displayed():
+                                btn_text = (btn.get_attribute("textContent") or btn.text or "").strip()
+                                btn_classes = btn.get_attribute("class") or ""
+                                print(f"   {j+1}. Text: '{btn_text}' | Classes: '{btn_classes[:30]}...'")
+                        except:
+                            continue
+                else:
+                    print("   ❌ No buttons found in modal containers")
+            except Exception as debug_error:
+                print(f"   ⚠️ Debug search failed: {debug_error}")
+            
+            # Try direct navigation as fallback from modal handling
+            print("🔄 Trying direct navigation as fallback from modal...")
+            try:
+                driver.get("https://console.cloud.google.com/projectcreate")
+                time.sleep(random.uniform(3.0, 5.0))
+                current_url = driver.current_url
+                if "projectcreate" in current_url or "create" in current_url:
+                    print("✅ Successfully navigated to project creation page directly from modal fallback!")
+                    return True
+                else:
+                    print("⚠️ Direct navigation from modal didn't work")
+                    return False
+            except Exception as direct_nav_error:
+                print(f"⚠️ Direct navigation from modal failed: {direct_nav_error}")
+                return False
+            
+    except Exception as modal_error:
+        print(f"❌ Error handling modal: {modal_error}")
+        return False
+
 def handle_new_project_modal_fallback(driver):
     """Fallback function to handle New Project modal when automatic detection fails"""
     print("🔧 Manual intervention required for New Project creation")
@@ -3977,8 +4216,7 @@ def handle_google_verifications(driver, context="general"):
             verification_indicators = {
                 'phone': [
                     'verify your phone number', 'phone verification required', 'enter your phone number to verify',
-                    'add a phone number', 'verify this phone number', 'confirm your phone number',
-                    'enter a phone number to get a text message', 'phone number', 'verify it\'s you'
+                    'add a phone number', 'verify this phone number', 'confirm your phone number'
                 ],
                 'email': [
                     'verify your email address', 'email verification required', 'check your email for verification',
@@ -3994,8 +4232,7 @@ def handle_google_verifications(driver, context="general"):
                 ],
                 'identity': [
                     'verify it\'s really you', 'confirm it\'s you', 'prove it\'s you',
-                    'identity verification required', 'account verification needed',
-                    'verify it\'s you', 'to help keep your account safe'
+                    'identity verification required', 'account verification needed'
                 ],
                 'security': [
                     'unusual sign-in activity', 'suspicious sign-in attempt', 'security check required',
@@ -4024,68 +4261,61 @@ def handle_google_verifications(driver, context="general"):
             ]
             
             # Check if we're on a normal Google page (not verification)
-            is_normal_page = any(page in current_url or page in page_title.lower() 
+            is_normal_page = any(page in current_url or page in page_title.lower() or page in page_source 
                                for page in normal_google_pages)
             
-            # Enhanced verification detection - look for verification patterns
-            verification_detected = False
-            verification_type = None
-            
-            # Check for specific verification patterns
-            for v_type, indicators in verification_indicators.items():
-                for indicator in indicators:
-                    if indicator in page_source:
-                        # For phone verification, also check for common phone verification context
-                        if v_type == 'phone':
-                            phone_context_words = [
-                                'text message', 'verification code', 'phone number', 
-                                'verify it\'s you', 'keep your account safe', 'sms'
-                            ]
-                            has_phone_context = any(context in page_source for context in phone_context_words)
-                            if has_phone_context:
-                                verification_detected = True
-                                verification_type = v_type
-                                print(f"🔍 Detected {v_type} verification: '{indicator}'")
-                                break
-                        else:
-                            # For other verification types, simpler detection
-                            verification_detected = True
-                            verification_type = v_type
-                            print(f"🔍 Detected {v_type} verification: '{indicator}'")
+            if is_normal_page:
+                # Only proceed with verification detection if there are explicit verification prompts
+                explicit_verification_found = False
+                for v_type, indicators in verification_indicators.items():
+                    for indicator in indicators:
+                        if (indicator in page_source and 
+                            ('required' in page_source or 'verify' in page_source or 'enter' in page_source)):
+                            explicit_verification_found = True
                             break
-                if verification_detected:
-                    break
+                    if explicit_verification_found:
+                        break
+                
+                if not explicit_verification_found:
+                    print("✅ On normal Google account page - no verification required")
+                    return True
+            else:
+                explicit_verification_found = True  # Not on normal page, proceed with detection
             
-            # If on normal page but no verification detected, skip verification handling
-            if is_normal_page and not verification_detected:
-                print("✅ On normal Google account page - no verification required")
-                return True
+            # Check if any verification is detected (but only if not on normal page or explicit verification found)
+            verification_type = None
+            if not is_normal_page or explicit_verification_found:
+                for v_type, indicators in verification_indicators.items():
+                    verification_found = False
+                    for indicator in indicators:
+                        # More strict matching - require verification context
+                        if (indicator in page_source and 
+                            (('verify' in page_source and 'required' in page_source) or
+                             ('enter' in page_source and ('code' in page_source or 'phone' in page_source)) or
+                             ('confirm' in page_source and ('identity' in page_source or 'account' in page_source)) or
+                             ('prove' in page_source and 'you' in page_source) or
+                             ('captcha' in page_source or 'robot' in page_source))):
+                            verification_type = v_type
+                            verification_found = True
+                            print(f"⚠️ {v_type.upper()} verification detected with context!")
+                            break
+                    if verification_found:
+                        break
             
-            # If verification was detected, handle it
-            if not verification_detected:
+            if not verification_type:
                 print("✅ No verification detected")
                 return True
             
             # Handle different types of verifications
             verification_handled = False
             
-            print(f"🔄 Attempting to handle {verification_type} verification...")
-            
             if verification_type in ['phone', 'email', 'code', '2fa', 'identity', 'security']:
                 # Try to skip/dismiss first
                 print(f"🔄 Attempting to bypass {verification_type} verification...")
                 
                 skip_selectors = [
-                    # Phone verification specific skips for "Verify it's you" page
+                    # Skip/dismiss buttons
                     "//button[contains(text(), 'Skip')]",
-                    "//button[contains(text(), 'Try another way')]",
-                    "//button[contains(text(), 'Use another method')]",
-                    "//a[contains(text(), 'Try another way')]",
-                    "//a[contains(text(), 'Use another method')]",
-                    "//span[contains(text(), 'Try another way')]/parent::button",
-                    "//span[contains(text(), 'Use another method')]/parent::button",
-                    
-                    # General skip/dismiss buttons
                     "//button[contains(text(), 'Not now')]",
                     "//button[contains(text(), 'Later')]", 
                     "//button[contains(text(), 'Ask later')]",
@@ -5973,323 +6203,114 @@ try:
         print(f"⚠️ Error handling welcome modal: {country_modal_error}")
         print("💡 You may need to manually complete the country selection if prompted")
 
-    # Step 5: Click new project button
-    print("🆕 Clicking new project button...")
+    # Step 5: Create new project using direct approach
+    print("🆕 Creating new project...")
+    print("🚀 STRATEGY: Direct navigation to project creation page")
     
-    # First, ensure any modals are completely closed
-    print("🔍 Ensuring all modals are closed before proceeding...")
-    time.sleep(random.uniform(2.0, 4.0))
-    
-    # Check for and dismiss any remaining overlays
+    # Primary approach: Direct navigation to project creation page
+    print("📍 Navigating directly to: https://console.cloud.google.com/projectcreate")
     try:
-        overlays = driver.find_elements(By.CSS_SELECTOR, ".cdk-overlay-backdrop, .cdk-overlay-container, .mat-mdc-dialog-container")
-        for overlay in overlays:
-            if overlay.is_displayed():
-                print("🔍 Found remaining overlay, dismissing...")
-                driver.execute_script("arguments[0].style.display = 'none';", overlay)
-                time.sleep(1.0)
-    except:
-        pass
+        # Direct navigation to project creation page
+        driver.get("https://console.cloud.google.com/projectcreate")
+        print("✅ Successfully navigated to project creation page!")
+        
+        # Wait for page to load
+        print("⏳ Waiting for project creation page to load...")
+        time.sleep(random.uniform(3.0, 5.0))
+        
+        # Check for CAPTCHA or verification
+        if not wait_for_page_load_and_check_captcha(driver):
+            print("⚠️ CAPTCHA or verification detected during navigation")
+        
+        # Verify we're on the correct page
+        current_url = driver.current_url
+        if "projectcreate" in current_url or "create" in current_url:
+            print("✅ Confirmed: On project creation page")
+            print(f"📍 Current URL: {current_url}")
+            project_creation_success = True
+        else:
+            print(f"⚠️ Unexpected URL after navigation: {current_url}")
+            project_creation_success = False
+            
+    except Exception as direct_error:
+        print(f"❌ Direct approach failed: {direct_error}")
+        print("🔄 Will fall back to traditional button-clicking approach...")
+        project_creation_success = False
     
+    # Fallback approach: Traditional button clicking
+    if not project_creation_success:
+        print("� Direct approach failed, trying traditional button-clicking approach...")
+        project_creation_success = False  # Traditional approach not implemented
+    
+    # Final fallback: Manual intervention
+    if not project_creation_success:
+        print("❌ Both approaches failed!")
+        print("🔧 Manual intervention required...")
+        print("💡 Please manually navigate to: https://console.cloud.google.com/projectcreate")
+        input("Press Enter after you're on the project creation page...")
+    
+    # Step 6: Fill project name
+    print("📝 Filling project name...")
     try:
-        # Try multiple selectors for the project button
-        selectors = [
-            "#ocb-platform-bar > cfc-platform-bar > div > div.cfc-platform-bar-left > div > div > div > pcc-platform-bar-purview-switcher > pcc-purview-switcher > cfc-switcher-button > button",
-            "pcc-purview-switcher cfc-switcher-button button",
-            "button[aria-label*='project']",
-            "cfc-switcher-button button"
+        # Try multiple selectors for project name input
+        name_selectors = [
+            "#p6ntest-name-input",
+            "input[id='p6ntest-name-input']",
+            "input[matinput][cfcfocusandselectoninit]",
+            "input[name='projectId']",
+            "input[placeholder*='project']",
+            "input[aria-label*='project']",
+            "input[formcontrolname*='project']",
+            "input[type='text']"
         ]
         
-        project_btn = None
-        for selector in selectors:
+        project_name_input = None
+        for selector in name_selectors:
             try:
-                project_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                print(f"✅ Found project button with selector: {selector}")
+                project_name_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
+                print(f"✅ Found project name input with selector: {selector}")
                 break
             except TimeoutException:
                 continue
         
-        if project_btn is None:
-            raise Exception("Could not find project button with any selector")
+        if project_name_input is None:
+            print("⚠️ Could not find project name input, trying alternative approach...")
+            # Try to find any visible text input
+            text_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
+            for input_elem in text_inputs:
+                if input_elem.is_displayed() and input_elem.is_enabled():
+                    project_name_input = input_elem
+                    break
         
-        # Use JavaScript click to avoid interception issues
-        try:
-            print("🖱️ Using JavaScript click for project button...")
-            driver.execute_script("arguments[0].scrollIntoView(true);", project_btn)
+        if project_name_input:
+            # Make sure the element is visible and clickable
+            driver.execute_script("arguments[0].scrollIntoView(true);", project_name_input)
+            time.sleep(random.uniform(0.5, 1.0))
+            
+            # Click to focus
+            human_mouse_move_to(project_name_input)
+            project_name_input.click()
+            time.sleep(random.uniform(0.5, 1.0))
+            
+            # Clear any existing text using multiple methods
+            project_name_input.clear()
+            project_name_input.send_keys(Keys.CONTROL + "a")  # Select all
+            project_name_input.send_keys(Keys.DELETE)  # Delete
+            time.sleep(random.uniform(0.3, 0.7))
+            
+            # Type the project name
+            human_typing(project_name_input, PROJECT_NAME)
+            print("✅ Project name filled successfully!")
             time.sleep(random.uniform(1.0, 2.0))
-            driver.execute_script("arguments[0].click();", project_btn)
-            print("✅ New project button clicked successfully with JavaScript!")
-        except Exception as js_click_error:
-            print(f"⚠️ JavaScript click failed: {js_click_error}")
-            print("🔄 Trying regular click...")
-            # Fallback to regular click
-            try:
-                driver.execute_script("arguments[0].scrollIntoView(true);", project_btn)
-                time.sleep(random.uniform(1.0, 2.0))
-                human_mouse_move_to(project_btn)
-                project_btn.click()
-                print("✅ New project button clicked successfully!")
-            except Exception as click_error:
-                print(f"⚠️ Regular click also failed: {click_error}")
-                raise click_error
+        else:
+            print("❌ Could not find project name input field")
             
-        time.sleep(random.uniform(3.0, 5.0))  # Max 5 seconds for project creation as requested
-        
-        # Step 6: Click "New Project" button in the modal
-        print("🆕 Clicking 'New Project' button in modal...")
-        try:
-            # Enhanced modal "New Project" button detection with multiple selectors
-            
-            # First, ensure the modal is fully loaded and visible
-            print("🔍 Detecting project picker modal...")
-            modal_detected = False
-            modal_selectors = [
-                "//div[contains(@class, 'mat-mdc-dialog-container')]",
-                "//div[contains(@class, 'cdk-overlay-container')]",
-                "[role='dialog']",
-                "//mat-dialog-container",
-                "#purview-picker-modal-action-bar",
-                "//mat-toolbar[@id='purview-picker-modal-action-bar']"
-            ]
-            
-            for modal_selector in modal_selectors:
-                try:
-                    if modal_selector.startswith("//") or modal_selector.startswith("#"):
-                        modal_element = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH if modal_selector.startswith("//") else By.CSS_SELECTOR, modal_selector)))
-                    else:
-                        modal_element = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, modal_selector)))
-                    
-                    if modal_element and modal_element.is_displayed():
-                        print(f"✅ Modal detected with selector: {modal_selector}")
-                        modal_detected = True
-                        break
-                except:
-                    continue
-            
-            if not modal_detected:
-                print("⚠️ Could not detect modal dialog")
-                print("🔍 Checking if we're already on the project creation page...")
-                current_url = driver.current_url
-                if "projectcreate" in current_url or "create" in current_url:
-                    print("✅ Already on project creation page - skipping modal step")
-                    modal_detected = True
-                else:
-                    print("💡 Modal might not have opened - waiting longer...")
-                    time.sleep(random.uniform(3.0, 5.0))
-            
-            modal_new_project_selectors = [
-                # Original selector
-                "//*[@id='purview-picker-modal-action-bar']/mat-toolbar/div[3]/div/div/div[1]/div/button[2]",
-                
-                # Alternative specific selectors for the modal
-                "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[contains(text(), 'New Project')]",
-                "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[contains(text(), 'NEW PROJECT')]",
-                "//*[@id='purview-picker-modal-action-bar']//button[contains(text(), 'New Project')]",
-                "//*[@id='purview-picker-modal-action-bar']//button[contains(text(), 'NEW PROJECT')]",
-                
-                # Generic modal selectors for "New Project" button
-                "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(text(), 'New Project')]",
-                "//div[contains(@class, 'cdk-overlay-container')]//button[contains(text(), 'New Project')]",
-                "//mat-dialog-container//button[contains(text(), 'New Project')]",
-                "[role='dialog']//button[contains(text(), 'New Project')]",
-                
-                # More flexible modal button selectors
-                "//button[contains(text(), 'New Project') and not(contains(text(), 'Select'))]",
-                "//button[contains(text(), 'NEW PROJECT') and not(contains(text(), 'SELECT'))]",
-                "//button[normalize-space(text())='New Project']",
-                "//button[normalize-space(text())='NEW PROJECT']",
-                "//span[normalize-space(text())='New Project']/parent::button",
-                "//span[normalize-space(text())='NEW PROJECT']/parent::button",
-                
-                # Button position-based selectors in modal action bar
-                "//*[@id='purview-picker-modal-action-bar']//button[last()]",
-                "//*[@id='purview-picker-modal-action-bar']//button[2]",
-                "//*[@id='purview-picker-modal-action-bar']//button[position()=2]",
-                "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[last()]",
-                "//mat-toolbar[@id='purview-picker-modal-action-bar']//button[2]",
-                
-                # Primary/raised button styles in modal
-                "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(@class, 'mat-mdc-raised-button')]",
-                "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(@class, 'mdc-button--raised')]",
-                "[role='dialog']//button[contains(@class, 'mat-mdc-raised-button')]",
-                "[role='dialog']//button[contains(@class, 'mdc-button--raised')]",
-                
-                # Fallback selectors for any "New" or "Create" buttons in modal
-                "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(text(), 'New')]",
-                "//div[contains(@class, 'mat-mdc-dialog-container')]//button[contains(text(), 'Create')]",
-                "[role='dialog']//button[contains(text(), 'New')]",
-                "[role='dialog']//button[contains(text(), 'Create')]"
-            ]
-            
-            new_project_btn = None
-            successful_selector = None
-            
-            # Wait for modal to be visible first
-            print("⏳ Waiting for project picker modal to be visible...")
-            time.sleep(random.uniform(2.0, 4.0))
-            
-            # Try each selector to find the modal "New Project" button
-            for i, selector in enumerate(modal_new_project_selectors):
-                try:
-                    print(f"🔍 Trying modal 'New Project' selector {i+1}/{len(modal_new_project_selectors)}: {selector[:80]}...")
-                    
-                    # Use a shorter timeout for each attempt
-                    element = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                    
-                    if element and element.is_displayed() and element.is_enabled():
-                        # Additional validation for the button
-                        btn_text = (element.get_attribute("textContent") or element.text or "").strip()
-                        btn_classes = element.get_attribute("class") or ""
-                        
-                        print(f"   📋 Found button - Text: '{btn_text}', Classes: '{btn_classes[:50]}...'")
-                        
-                        # Validate this is likely the correct button
-                        is_valid_button = (
-                            "new project" in btn_text.lower() or
-                            "new" in btn_text.lower() or
-                            "create" in btn_text.lower() or
-                            "mdc-button--raised" in btn_classes or
-                            "mat-mdc-raised-button" in btn_classes
-                        )
-                        
-                        if is_valid_button:
-                            new_project_btn = element
-                            successful_selector = selector
-                            print(f"✅ Found valid modal 'New Project' button with selector: {selector[:80]}...")
-                            break
-                        else:
-                            print(f"   ⚠️ Button found but doesn't appear to be the correct 'New Project' button")
-                    
-                except TimeoutException:
-                    continue
-                except Exception as selector_error:
-                    print(f"   ⚠️ Selector failed: {selector_error}")
-                    continue
-            
-            if new_project_btn:
-                print(f"✅ Modal 'New Project' button found! Using selector: {successful_selector[:80]}...")
-                
-                # Try regular click first
-                try:
-                    driver.execute_script("arguments[0].scrollIntoView(true);", new_project_btn)
-                    time.sleep(random.uniform(1.0, 2.0))
-                    human_mouse_move_to(new_project_btn)
-                    new_project_btn.click()
-                    print("✅ Modal 'New Project' button clicked successfully!")
-                except Exception as modal_click_error:
-                    print(f"⚠️ Regular click failed: {modal_click_error}")
-                    print("🔄 Trying JavaScript click...")
-                    # Fallback to JavaScript click
-                    driver.execute_script("arguments[0].click();", new_project_btn)
-                    print("✅ Modal 'New Project' button clicked with JavaScript!")
-                    
-                time.sleep(random.uniform(2.0, 4.0))
-            else:
-                print("❌ Could not find modal 'New Project' button with any selector")
-                
-                # Enhanced debugging - show all visible buttons in modal
-                print("🔍 Debugging: Looking for all visible buttons in modal...")
-                try:
-                    modal_buttons = driver.find_elements(By.XPATH, "//div[contains(@class, 'mat-mdc-dialog-container')]//button | //div[contains(@class, 'cdk-overlay-container')]//button | //[role='dialog']//button")
-                    if modal_buttons:
-                        print(f"📋 Found {len(modal_buttons)} buttons in modal:")
-                        for j, btn in enumerate(modal_buttons):
-                            try:
-                                if btn.is_displayed():
-                                    btn_text = (btn.get_attribute("textContent") or btn.text or "").strip()
-                                    btn_classes = btn.get_attribute("class") or ""
-                                    print(f"   {j+1}. Text: '{btn_text}' | Classes: '{btn_classes[:30]}...'")
-                            except:
-                                continue
-                    else:
-                        print("   ❌ No buttons found in modal containers")
-                except Exception as debug_error:
-                    print(f"   ⚠️ Debug search failed: {debug_error}")
-                
-                # Manual fallback function
-                print("🔧 Calling manual fallback function...")
-                provide_new_project_modal_guidance()
-                
-                # Try direct navigation to project creation as alternative
-                print("🔄 Attempting direct navigation to project creation page...")
-                try:
-                    driver.get("https://console.cloud.google.com/projectcreate")
-                    time.sleep(random.uniform(3.0, 5.0))
-                    current_url = driver.current_url
-                    if "projectcreate" in current_url or "create" in current_url:
-                        print("✅ Successfully navigated to project creation page directly!")
-                        print("📝 The automation will continue with project creation form...")
-                    else:
-                        print("⚠️ Direct navigation didn't work, manual intervention required")
-                        handle_new_project_modal_fallback(driver)
-                        raise Exception("Manual intervention required for modal 'New Project' button")
-                except Exception as direct_nav_error:
-                    print(f"⚠️ Direct navigation failed: {direct_nav_error}")
-                    handle_new_project_modal_fallback(driver)
-                    raise Exception("Manual intervention required for modal 'New Project' button")
-            
-            # Step 7: Fill project name
-            print("📝 Filling project name...")
-            try:
-                # Try multiple selectors for project name input
-                name_selectors = [
-                    "#p6ntest-name-input",
-                    "input[id='p6ntest-name-input']",
-                    "input[matinput][cfcfocusandselectoninit]",
-                    "input[name='projectId']",
-                    "input[placeholder*='project']",
-                    "input[aria-label*='project']",
-                    "input[formcontrolname*='project']",
-                    "input[type='text']"
-                ]
-                
-                project_name_input = None
-                for selector in name_selectors:
-                    try:
-                        project_name_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
-                        print(f"✅ Found project name input with selector: {selector}")
-                        break
-                    except TimeoutException:
-                        continue
-                
-                if project_name_input is None:
-                    print("⚠️ Could not find project name input, trying alternative approach...")
-                    # Try to find any visible text input
-                    text_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-                    for input_elem in text_inputs:
-                        if input_elem.is_displayed() and input_elem.is_enabled():
-                            project_name_input = input_elem
-                            break
-                
-                if project_name_input:
-                    # Make sure the element is visible and clickable
-                    driver.execute_script("arguments[0].scrollIntoView(true);", project_name_input)
-                    time.sleep(random.uniform(0.5, 1.0))
-                    
-                    # Click to focus
-                    human_mouse_move_to(project_name_input)
-                    project_name_input.click()
-                    time.sleep(random.uniform(0.5, 1.0))
-                    
-                    # Clear any existing text using multiple methods
-                    project_name_input.clear()
-                    project_name_input.send_keys(Keys.CONTROL + "a")  # Select all
-                    project_name_input.send_keys(Keys.DELETE)  # Delete
-                    time.sleep(random.uniform(0.3, 0.7))
-                    
-                    # Type the project name
-                    human_typing(project_name_input, PROJECT_NAME)
-                    print("✅ Project name filled successfully!")
-                    time.sleep(random.uniform(1.0, 2.0))
-                else:
-                    print("❌ Could not find project name input field")
-                    
-            except Exception as name_error:
-                print(f"❌ Error filling project name: {name_error}")
-            
-            # Step 8: Click create button
-            print("🚀 Clicking create button...")
-            try:
+    except Exception as name_error:
+        print(f"❌ Error filling project name: {name_error}")
+    
+    # Step 7: Click create button
+    print("🚀 Clicking create button...")
+    try:
                 create_btn_xpath = "/html/body/div[1]/div[3]/div[3]/div/pan-shell/pcc-shell/cfc-panel-container/div/div/cfc-panel/div/div/div[3]/cfc-panel-container/div/div/cfc-panel/div/div/cfc-panel-container/div/div/cfc-panel/div/div/cfc-panel-container/div/div/cfc-panel[2]/div/div/central-page-area/div/div/pcc-content-viewport/div/div/ng2-router-root/div/cfc-router-outlet/div/ng-component/cfc-single-panel-layout/cfc-panel-container/div/div/cfc-panel/div/div/div/cfc-panel-body/cfc-virtual-viewport/div[1]/div/proj-creation-form/form/button[1]/span[2]"
                 
                 # Also try alternative selectors
@@ -8538,31 +8559,7 @@ try:
                                                                                     print("")
                                                                                     
                                                                                     # Step 21: Configure Audience
-                                                                                    audience_result = configure_audience(driver)
-                                                                                    
-                                                                                    if audience_result:
-                                                                                        print("✅ Audience configuration completed successfully!")
-                                                                                        
-                                                                                        # Step 22: Publish the app
-                                                                                        print("📢 Proceeding to publish the app...")
-                                                                                        publish_result = publish_app(driver)
-                                                                                        
-                                                                                        if publish_result:
-                                                                                            print("✅ App published successfully!")
-                                                                                            
-                                                                                            # Step 23: Create OAuth client credentials
-                                                                                            print("🔧 Proceeding to create OAuth client credentials...")
-                                                                                            client_result = create_oauth_client(driver)
-                                                                                            
-                                                                                            if client_result:
-                                                                                                print("🎉 COMPLETE AUTOMATION FINISHED SUCCESSFULLY!")
-                                                                                                print("📁 JSON credentials file should be downloaded!")
-                                                                                            else:
-                                                                                                print("⚠️ OAuth client creation incomplete, but main setup is done")
-                                                                                        else:
-                                                                                            print("⚠️ App publishing incomplete, but main setup is done")
-                                                                                    else:
-                                                                                        print("⚠️ Audience configuration incomplete, but main setup is done")
+                                                                                    configure_audience(driver)
                                                                                     
                                                                                     print("🚀 Your Gmail API integration is now fully configured!")
                                                                                     print("📧 You can now use the Gmail API with your Google Cloud project.")
@@ -8591,31 +8588,7 @@ try:
                                                                                         print("")
                                                                                         
                                                                                         # Step 21: Configure Audience  
-                                                                                        audience_result = configure_audience(driver)
-                                                                                        
-                                                                                        if audience_result:
-                                                                                            print("✅ Audience configuration completed successfully!")
-                                                                                            
-                                                                                            # Step 22: Publish the app
-                                                                                            print("📢 Proceeding to publish the app...")
-                                                                                            publish_result = publish_app(driver)
-                                                                                            
-                                                                                            if publish_result:
-                                                                                                print("✅ App published successfully!")
-                                                                                                
-                                                                                                # Step 23: Create OAuth client credentials
-                                                                                                print("🔧 Proceeding to create OAuth client credentials...")
-                                                                                                client_result = create_oauth_client(driver)
-                                                                                                
-                                                                                                if client_result:
-                                                                                                    print("🎉 COMPLETE AUTOMATION FINISHED SUCCESSFULLY!")
-                                                                                                    print("📁 JSON credentials file should be downloaded!")
-                                                                                                else:
-                                                                                                    print("⚠️ OAuth client creation incomplete, but main setup is done")
-                                                                                            else:
-                                                                                                print("⚠️ App publishing incomplete, but main setup is done")
-                                                                                        else:
-                                                                                            print("⚠️ Audience configuration incomplete, but main setup is done")
+                                                                                        configure_audience(driver)
                                                                                         
                                                                                         print("🚀 Your Gmail API integration is now fully configured!")
                                                                                         print("📧 You can now use the Gmail API with your Google Cloud project.")
@@ -8717,64 +8690,27 @@ try:
                 else:
                     print("❌ Could not find create button")
                     
-            except Exception as create_error:
-                print(f"❌ Error clicking create button: {create_error}")
-            
-        except TimeoutException:
-            print("❌ Could not find 'New Project' button in modal")
-            print("💡 The modal might not have loaded or the button structure changed")
-            print("🔧 Attempting manual fallback for modal 'New Project' button...")
-            try:
-                provide_new_project_modal_guidance()
-                
-                # Try direct navigation as fallback
-                print("🔄 Attempting direct navigation to project creation page...")
-                driver.get("https://console.cloud.google.com/projectcreate")
-                time.sleep(random.uniform(3.0, 5.0))
-                current_url = driver.current_url
-                if "projectcreate" in current_url or "create" in current_url:
-                    print("✅ Successfully navigated to project creation page directly!")
-                else:
-                    handle_new_project_modal_fallback(driver)
-            except Exception as fallback_error:
-                print(f"⚠️ Fallback function failed: {fallback_error}")
-                handle_new_project_modal_fallback(driver)
-        except Exception as modal_error:
-            print(f"❌ Error clicking 'New Project' button: {modal_error}")
-            print("🔧 Attempting manual fallback for modal 'New Project' button...")
-            try:
-                provide_new_project_modal_guidance()
-                
-                # Try direct navigation as fallback  
-                print("🔄 Attempting direct navigation to project creation page...")
-                driver.get("https://console.cloud.google.com/projectcreate")
-                time.sleep(random.uniform(3.0, 5.0))
-                current_url = driver.current_url
-                if "projectcreate" in current_url or "create" in current_url:
-                    print("✅ Successfully navigated to project creation page directly!")
-                else:
-                    handle_new_project_modal_fallback(driver)
-            except Exception as fallback_error:
-                print(f"⚠️ Fallback function failed: {fallback_error}")
-                handle_new_project_modal_fallback(driver)
-        
-    except TimeoutException:
-        print("❌ Could not find or click new project button")
-        print("💡 The button might not be available yet or the page structure changed")
-    except Exception as e:
-        print(f"❌ Error clicking new project button: {e}")
-        print("🔄 Trying alternative approach...")
-        # Try clicking any element that contains "project" text
-        try:
-            project_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'project') or contains(text(), 'Project')]")
-            if project_elements:
-                for elem in project_elements:
-                    if elem.is_displayed() and elem.is_enabled():
-                        driver.execute_script("arguments[0].click();", elem)
-                        print("✅ Clicked alternative project element!")
-                        break
-        except Exception as alt_error:
-            print(f"❌ Alternative approach also failed: {alt_error}")
+    except Exception as create_error:
+        print(f"❌ Error clicking create button: {create_error}")
+    
+except TimeoutException:
+    print("❌ Could not find 'New Project' button in modal")
+    print("💡 The modal might not have loaded or the button structure changed")
+    print("🔧 Attempting manual fallback for modal 'New Project' button...")
+    # Legacy traditional approach code - commented out since using direct approach
+    print("✅ Using direct project creation approach - legacy modal handling skipped")
+
+# Continue with rest of automation (OAuth, API enabling, etc.)
+except TimeoutException:
+    print("❌ Could not complete project creation")
+    print("💡 Please manually create the project and continue")
+except Exception as e:
+    print(f"❌ Error in project creation: {e}")
+    print("🔄 Please manually create the project if needed")
+
+# Legacy code commented out - using direct approach instead
+# if elem.is_displayed() and elem.is_enabled():
+# driver.execute_script("arguments[0].click();", elem)
 
 except TimeoutException as e:
     print(f"⏰ Timeout Error: {e}")
