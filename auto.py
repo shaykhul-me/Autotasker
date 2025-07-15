@@ -25,8 +25,15 @@ pyautogui.FAILSAFE = False
 # Generate unique instance ID for this script run
 INSTANCE_ID = str(uuid.uuid4())[:8]
 INSTANCE_TIMESTAMP = int(time.time())
+
+# Start timing the automation
+AUTOMATION_START_TIME = time.time()
+START_TIME_FORMATTED = time.strftime('%H:%M:%S', time.localtime(AUTOMATION_START_TIME))
+
 print(f"🏷️ Instance ID: {INSTANCE_ID}")
-print(f"⏰ Instance started at: {time.strftime('%H:%M:%S')}")
+print(f"⏰ Instance started at: {START_TIME_FORMATTED}")
+print(f"⏱️ Automation timer started...")
+print("=" * 60)
 
 # Function to find available port for Chrome debugging
 def find_available_port(start_port=9222):
@@ -173,6 +180,17 @@ PROJECT_NAME = generate_random_project_name()
 
 # Fast timing configuration - reduce all delays
 FAST_MODE = True
+
+def print_milestone_timing(milestone_name):
+    """Print timing information for major milestones"""
+    current_time = time.time()
+    elapsed_time = current_time - AUTOMATION_START_TIME
+    current_time_formatted = time.strftime('%H:%M:%S', time.localtime(current_time))
+    
+    minutes = int(elapsed_time // 60)
+    seconds = int(elapsed_time % 60)
+    
+    print(f"⏱️  [{current_time_formatted}] {milestone_name} - Elapsed: {minutes:02d}:{seconds:02d}")
 
 def fast_sleep(min_time, max_time):
     """Sleep with reduced timing for fast mode"""
@@ -4212,8 +4230,6 @@ def recover_session_if_needed(driver):
             print(f"⚠️ Unexpected session error: {session_error}")
             return False, driver
 
-# ...existing code...
-
 def handle_google_verifications(driver, context="general"):
     """
     Comprehensive handler for all types of Google verification prompts with session recovery
@@ -5282,6 +5298,8 @@ try:
         
     else:
         print("✅ Already logged in or on Cloud Console!")
+
+    print_milestone_timing("✅ LOGIN COMPLETED")
 
     # Step 3: Handle any remaining verifications or terms of service
     
@@ -6377,6 +6395,7 @@ try:
                         
                     time.sleep(random.uniform(3.0, 5.0))
                     print("✅ Project creation initiated!")
+                    print_milestone_timing("🆕 PROJECT CREATION STARTED")
                     
                     # Step 9: Wait for project creation to complete and select the project
                     print("⏳ Waiting for project creation to complete...")
@@ -6833,6 +6852,7 @@ try:
                                     # After enabling Gmail API, proceed to OAuth consent screen
                                     if enable_btn_found:
                                         print("✅ Gmail API enabled successfully!")
+                                        print_milestone_timing("📧 GMAIL API ENABLED")
                                         time.sleep(random.uniform(3.0, 5.0))
                                         
                                         # Step 11: Set up OAuth consent screen
@@ -8104,6 +8124,7 @@ try:
                                                             print(f"📍 Final URL after Create button: {final_url}")
                                                             
                                                             print("🎉 OAuth consent screen creation completed successfully!")
+                                                            print_milestone_timing("🔐 OAUTH CONSENT SCREEN COMPLETED")
                                                             print("✅ All steps completed:")
                                                             print("   - App Information filled")
                                                             print("   - User support email selected")
@@ -8512,6 +8533,7 @@ try:
                                                                         print(f"📍 URL after Update button: {current_url_after_update}")
                                                                         
                                                                         print("🎉 Gmail API scope configuration completed successfully!")
+                                                                        print_milestone_timing("✅ FINAL SCOPE CONFIGURATION COMPLETED")
                                                                         print("✅ All automation steps completed:")
                                                                         print("   - Google login")
                                                                         print("   - Project creation")
@@ -8678,6 +8700,7 @@ try:
                                                 
                                                 print("🎉 Data Access configuration completed!")
                                                 print("✅ All steps completed successfully:")
+                                                print_milestone_timing("🎉 COMPLETE AUTOMATION FINISHED")
                                                 print("   - OAuth consent screen created")
                                                 print("   - Data Access page accessed")
                                                 print("   - Scopes configuration opened")
@@ -8753,6 +8776,39 @@ except Exception as e:
     print(f"Error type: {type(e).__name__}")
 
 finally:
+    # Calculate total automation time
+    AUTOMATION_END_TIME = time.time()
+    TOTAL_AUTOMATION_TIME = AUTOMATION_END_TIME - AUTOMATION_START_TIME
+    END_TIME_FORMATTED = time.strftime('%H:%M:%S', time.localtime(AUTOMATION_END_TIME))
+    
+    # Format time duration
+    hours = int(TOTAL_AUTOMATION_TIME // 3600)
+    minutes = int((TOTAL_AUTOMATION_TIME % 3600) // 60)
+    seconds = int(TOTAL_AUTOMATION_TIME % 60)
+    milliseconds = int((TOTAL_AUTOMATION_TIME % 1) * 1000)
+    
+    print("\n" + "=" * 70)
+    print("⏱️  AUTOMATION TIMING SUMMARY")
+    print("=" * 70)
+    print(f"🚀 Start Time:     {START_TIME_FORMATTED}")
+    print(f"🏁 End Time:       {END_TIME_FORMATTED}")
+    print(f"⏰ Total Duration: {hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}")
+    print(f"📊 Total Seconds:  {TOTAL_AUTOMATION_TIME:.3f} seconds")
+    
+    # Performance analysis
+    if TOTAL_AUTOMATION_TIME < 60:
+        print("🚀 Performance:    ULTRA FAST! (< 1 minute)")
+    elif TOTAL_AUTOMATION_TIME < 180:
+        print("⚡ Performance:    FAST (< 3 minutes)")
+    elif TOTAL_AUTOMATION_TIME < 300:
+        print("✅ Performance:    GOOD (< 5 minutes)")
+    elif TOTAL_AUTOMATION_TIME < 600:
+        print("⏳ Performance:    MODERATE (< 10 minutes)")
+    else:
+        print("🐌 Performance:    SLOW (> 10 minutes)")
+    
+    print("=" * 70)
+    
     print("🔚 Browser will remain open for manual interaction...")
     print("💡 Press Enter when you want to close the browser, or close it manually.")
     
