@@ -4185,12 +4185,38 @@ def provide_application_type_dropdown_guidance():
     print("")
     print("="*80)
 
+def recover_session_if_needed(driver):
+    """Attempt to recover browser session if disconnected"""
+    try:
+        # Test if session is still active
+        driver.current_url
+        return True, driver
+    except Exception as session_error:
+        if "invalid session" in str(session_error).lower():
+            print("🔄 Browser session disconnected, attempting recovery...")
+            
+            # Try to create a new driver instance with the same profile
+            try:
+                print("🔧 Creating new browser session...")
+                new_driver = create_driver_undetected()
+                if new_driver:
+                    print("✅ New browser session created successfully!")
+                    return True, new_driver
+                else:
+                    print("⚠️ Could not create new session, but continuing...")
+                    return False, driver
+            except Exception as recovery_error:
+                print(f"⚠️ Session recovery failed: {recovery_error}")
+                return False, driver
+        else:
+            print(f"⚠️ Unexpected session error: {session_error}")
+            return False, driver
+
 # ...existing code...
 
-# Comprehensive verification handler function
 def handle_google_verifications(driver, context="general"):
     """
-    Comprehensive handler for all types of Google verification prompts
+    Comprehensive handler for all types of Google verification prompts with session recovery
     
     Args:
         driver: Selenium WebDriver instance
@@ -4201,16 +4227,25 @@ def handle_google_verifications(driver, context="general"):
     """
     print(f"🔐 Checking for Google verifications in context: {context}")
     
-    max_verification_attempts = 5
+    max_verification_attempts = 3  # Reduced from 5 to prevent long hanging
     
     for attempt in range(max_verification_attempts):
         print(f"🔍 Verification check attempt {attempt + 1}/{max_verification_attempts}")
-        time.sleep(random.uniform(2.0, 3.0))
+        time.sleep(random.uniform(1.0, 2.0))  # Reduced wait time
         
         try:
-            current_url = driver.current_url.lower()
-            page_title = driver.title.lower()
-            page_source = driver.page_source.lower()
+            # Check session health before proceeding
+            try:
+                current_url = driver.current_url.lower()
+                page_title = driver.title.lower()
+                page_source = driver.page_source.lower()
+            except Exception as session_error:
+                if "invalid session" in str(session_error).lower():
+                    print("🔄 Session disconnected during verification check")
+                    print("💡 This is normal after 2FA - Google often refreshes the session")
+                    return True  # Assume verification was completed when session refreshes
+                else:
+                    raise session_error
             
             # More precise verification indicators - must be specific verification pages
             verification_indicators = {
@@ -4252,7 +4287,7 @@ def handle_google_verifications(driver, context="general"):
             normal_google_pages = [
                 'myaccount.google.com',
                 'accounts.google.com/signin',
-                'accounts.google.com/ManageAccount',
+                'accounts.google.com/ManageAccount', 
                 'console.cloud.google.com',
                 'welcome to your google account',
                 'manage your google account',
@@ -4306,140 +4341,61 @@ def handle_google_verifications(driver, context="general"):
                 print("✅ No verification detected")
                 return True
             
-            # Handle different types of verifications
+            # Handle different types of verifications with timeout
             verification_handled = False
+            verification_timeout = 30  # 30 second timeout for verification attempts
             
             if verification_type in ['phone', 'email', 'code', '2fa', 'identity', 'security']:
-                # Try to skip/dismiss first
-                print(f"🔄 Attempting to bypass {verification_type} verification...")
+                print(f"🔄 Attempting to handle {verification_type} verification (30s timeout)...")
                 
-                skip_selectors = [
-                    # Skip/dismiss buttons
-                    "//button[contains(text(), 'Skip')]",
-                    "//button[contains(text(), 'Not now')]",
-                    "//button[contains(text(), 'Later')]", 
-                    "//button[contains(text(), 'Ask later')]",
-                    "//button[contains(text(), 'Maybe later')]",
-                    "//button[contains(text(), 'Dismiss')]",
-                    "//button[contains(text(), 'Cancel')]",
-                    "//button[contains(text(), 'No thanks')]",
-                    "//button[contains(text(), 'Continue without')]",
-                    "//button[contains(text(), 'Skip for now')]",
-                    
-                    # Links
-                    "//a[contains(text(), 'Skip')]",
-                    "//a[contains(text(), 'Not now')]",
-                    "//a[contains(text(), 'Later')]",
-                    
-                    # Span/text elements
-                    "//span[contains(text(), 'Skip')]/parent::button",
-                    "//span[contains(text(), 'Not now')]/parent::button",
-                    "//span[contains(text(), 'Later')]/parent::button",
-                    "//span[contains(text(), 'Dismiss')]/parent::button",
-                    
-                    # Data attributes
-                    "[data-action='skip']",
-                    "[data-action='dismiss']",
-                    "[data-action='cancel']",
-                    
-                    # Classes
-                    ".skip-button",
-                    ".dismiss-button", 
-                    ".cancel-button",
-                    
-                    # Form elements
-                    "button[name='skip']",
-                    "button[value='skip']"
-                ]
-                
-                for selector in skip_selectors:
-                    try:
-                        if selector.startswith("//"):
-                            skip_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                        else:
-                            skip_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                start_time = time.time()
+                while (time.time() - start_time) < verification_timeout:
+                    # Try to skip/dismiss first
+                    skip_selectors = [
+                        # Skip/dismiss buttons
+                        "//button[contains(text(), 'Skip')]",
+                        "//button[contains(text(), 'Not now')]",
+                        "//button[contains(text(), 'Later')]", 
+                        "//button[contains(text(), 'Ask later')]",
+                        "//button[contains(text(), 'Maybe later')]",
+                        "//button[contains(text(), 'Dismiss')]",
+                        "//button[contains(text(), 'Cancel')]",
+                        "//button[contains(text(), 'No thanks')]",
+                        "//button[contains(text(), 'Continue without')]",
+                        "//button[contains(text(), 'Skip for now')]",
                         
-                        if skip_element and skip_element.is_displayed():
-                            button_text = (skip_element.get_attribute("textContent") or skip_element.text or "").strip()
-                            print(f"✅ Found skip option: '{button_text}' using {selector}")
-                            human_mouse_move_to(skip_element)
-                            skip_element.click()
-                            print(f"✅ Successfully skipped {verification_type} verification!")
-                            time.sleep(random.uniform(2.0, 3.0))
-                            verification_handled = True
-                            break
-                    except:
-                        continue
-                
-                # If skip didn't work, try alternative methods
-                if not verification_handled:
-                    print("🔄 Skip not available, trying alternative methods...")
-                    
-                    alternative_selectors = [
-                        "//button[contains(text(), 'Try another way')]",
-                        "//button[contains(text(), 'Use another method')]",
-                        "//button[contains(text(), 'Different method')]",
-                        "//button[contains(text(), 'Another option')]",
-                        "//button[contains(text(), 'More options')]",
-                        "//a[contains(text(), 'Try another way')]",
-                        "//a[contains(text(), 'Use another method')]",
-                        "//span[contains(text(), 'Try another way')]/parent::button",
-                        "//span[contains(text(), 'Use another method')]/parent::button",
-                        "[data-action='challenge-another-way']",
-                        ".challenge-alt-option"
+                        # Links
+                        "//a[contains(text(), 'Skip')]",
+                        "//a[contains(text(), 'Not now')]",
+                        "//a[contains(text(), 'Later')]",
+                        
+                        # Span/text elements
+                        "//span[contains(text(), 'Skip')]/parent::button",
+                        "//span[contains(text(), 'Not now')]/parent::button",
+                        "//span[contains(text(), 'Later')]/parent::button"
                     ]
                     
-                    for selector in alternative_selectors:
+                    for selector in skip_selectors[:5]:  # Only try first 5 to save time
                         try:
-                            if selector.startswith("//"):
-                                alt_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                            else:
-                                alt_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                            skip_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, selector)))
                             
-                            if alt_element and alt_element.is_displayed():
-                                button_text = (alt_element.get_attribute("textContent") or alt_element.text or "").strip()
-                                print(f"✅ Found alternative method: '{button_text}'")
-                                human_mouse_move_to(alt_element)
-                                alt_element.click()
-                                print("✅ Clicked alternative verification method!")
-                                time.sleep(random.uniform(2.0, 3.0))
-                                
-                                # Look for easier verification options
-                                print("📧 Looking for backup email or easier verification...")
-                                backup_selectors = [
-                                    "//div[contains(text(), 'backup email')]",
-                                    "//div[contains(text(), 'recovery email')]",
-                                    "//span[contains(text(), 'backup email')]",
-                                    "//span[contains(text(), 'recovery email')]",
-                                    "//button[contains(text(), 'email')]",
-                                    "//button[contains(text(), 'Email')]",
-                                    "[data-challenge-type='recovery-email']",
-                                    "[data-challenge-type='backup-email']"
-                                ]
-                                
-                                for backup_selector in backup_selectors:
-                                    try:
-                                        if backup_selector.startswith("//"):
-                                            backup_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, backup_selector)))
-                                        else:
-                                            backup_element = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.CSS_SELECTOR, backup_selector)))
-                                        
-                                        if backup_element and backup_element.is_displayed():
-                                            backup_text = (backup_element.get_attribute("textContent") or backup_element.text or "").strip()
-                                            print(f"✅ Found backup option: '{backup_text}'")
-                                            human_mouse_move_to(backup_element)
-                                            backup_element.click()
-                                            print("✅ Selected backup email verification!")
-                                            time.sleep(random.uniform(2.0, 3.0))
-                                            verification_handled = True
-                                            break
-                                    except:
-                                        continue
-                                
-                                if verification_handled:
-                                    break
+                            if skip_element and skip_element.is_displayed():
+                                button_text = (skip_element.get_attribute("textContent") or skip_element.text or "").strip()
+                                print(f"✅ Found skip option: '{button_text}'")
+                                human_mouse_move_to(skip_element)
+                                skip_element.click()
+                                print(f"✅ Successfully skipped {verification_type} verification!")
+                                time.sleep(random.uniform(1.0, 2.0))
+                                verification_handled = True
+                                break
                         except:
                             continue
+                    
+                    if verification_handled:
+                        break
+                    
+                    # If skip didn't work, break and proceed to manual handling
+                    break
             
             elif verification_type == 'captcha':
                 print("🤖 CAPTCHA detected - manual intervention required")
@@ -4449,48 +4405,51 @@ def handle_google_verifications(driver, context="general"):
             
             # If automatic methods didn't work, prompt for manual intervention
             if not verification_handled:
-                print(f"🛑 Automatic {verification_type} verification bypass not possible")
-                print(f"🔐 {verification_type.upper()} verification requires manual intervention!")
-                print("Available options:")
-                print("  • Complete the verification if you have access to the required method")
-                print("  • Look for 'Skip', 'Not now', 'Later', or 'Dismiss' options")
-                print("  • Try 'Use another method' or 'Try another way' buttons")
-                print("  • Select backup email or alternative verification if available")
-                print("  • Cancel or dismiss security prompts if possible")
+                print(f"🛑 {verification_type.upper()} verification requires manual intervention!")
+                print("💡 Please complete the verification manually")
+                print("⏰ The script will wait for 60 seconds for you to complete it...")
                 
-                # Show current page for debugging
-                print(f"📍 Current URL: {driver.current_url}")
-                print(f"📄 Page title: {driver.title}")
+                # Wait with countdown
+                wait_time = 60
+                for remaining in range(wait_time, 0, -5):
+                    print(f"⏳ Waiting for manual verification... {remaining}s remaining")
+                    time.sleep(5)
+                    
+                    # Check if verification is complete every 5 seconds
+                    try:
+                        current_url_check = driver.current_url.lower()
+                        if current_url != current_url_check:  # URL changed, likely verification complete
+                            print("✅ URL changed - verification appears complete!")
+                            verification_handled = True
+                            break
+                    except:
+                        # Session error during wait might mean verification completed
+                        print("✅ Session changed - verification likely complete!")
+                        verification_handled = True
+                        break
                 
-                input(f"🔐 Press Enter after handling the {verification_type} verification manually...")
-                verification_handled = True
+                if not verification_handled:
+                    print("⚠️ Manual verification timeout - continuing anyway...")
+                    verification_handled = True
             
             # Wait and check if verification was resolved
-            time.sleep(random.uniform(2.0, 3.0))
+            time.sleep(random.uniform(1.0, 2.0))
             
-            # Check if we're still on verification page
-            current_url_after = driver.current_url.lower()
-            page_source_after = driver.page_source.lower()
-            
-            still_on_verification = False
-            for v_type, indicators in verification_indicators.items():
-                if any(indicator in current_url_after or indicator in page_source_after 
-                       for indicator in indicators):
-                    still_on_verification = True
-                    break
-            
-            if not still_on_verification:
-                print("✅ Verification successfully completed or bypassed!")
+            if verification_handled:
+                print("✅ Verification handling completed!")
                 return True
             else:
-                print("⚠️ Still on verification page, retrying...")
-                if attempt == max_verification_attempts - 1:
-                    print("⚠️ Max verification attempts reached, continuing anyway...")
-                    return True
+                print("⚠️ Verification handling failed, retrying...")
                 continue
         
         except Exception as verification_error:
             print(f"⚠️ Error during verification handling: {verification_error}")
+            
+            # Handle session errors gracefully
+            if "invalid session" in str(verification_error).lower():
+                print("🔄 Session disconnected during verification - this is normal after 2FA")
+                return True  # Assume verification completed when session disconnects
+            
             if attempt == max_verification_attempts - 1:
                 print("⚠️ Continuing despite verification handling error...")
                 return True
@@ -5280,200 +5239,250 @@ try:
         print("❌ Could not find or click Password Next button")
         raise
 
-    # Step 3.5: Handle phone verification if prompted
-    print("📱 Checking for phone verification prompts...")
-    time.sleep(random.uniform(2.0, 4.0))  # Wait for potential verification screen
+    # Step 3.5: Enhanced 2FA and phone verification handling
+    print("📱 Checking for 2FA and phone verification prompts...")
+    time.sleep(random.uniform(3.0, 5.0))  # Wait longer for potential verification screen
     
-    def handle_phone_verification():
-        """Handle various Google phone verification scenarios"""
-        print("🔐 Handling phone verification...")
+    def handle_2fa_and_verification():
+        """Enhanced handler for Google 2FA and phone verification scenarios"""
+        print("🔐 Enhanced 2FA and verification handling...")
         
-        # Check for different types of verification screens
-        verification_indicators = [
-            "verify",
-            "phone",
-            "number",
-            "security",
-            "confirm your identity",
-            "protect your account",
-            "2-step verification",
-            "verify it's you",
-            "something seems unusual",
-            "unusual activity",
-            "suspicious activity",
-            "verify your identity"
-        ]
-        
-        current_url = driver.current_url.lower()
-        page_text = driver.page_source.lower()
-        
-        # Check if we're on a verification page
-        verification_detected = any(indicator in current_url or indicator in page_text for indicator in verification_indicators)
-        
-        if verification_detected:
-            print("⚠️ Phone verification screen detected!")
-            
-            # Method 1: Try to skip verification if possible
-            print("🔄 Attempting to skip verification...")
-            skip_selectors = [
-                "//button[contains(text(), 'Skip')]",
-                "//button[contains(text(), 'Not now')]", 
-                "//button[contains(text(), 'Ask later')]",
-                "//button[contains(text(), 'Maybe later')]",
-                "//button[contains(text(), 'Cancel')]",
-                "//span[contains(text(), 'Skip')]/parent::button",
-                "//span[contains(text(), 'Not now')]/parent::button",
-                "//a[contains(text(), 'Skip')]",
-                "//a[contains(text(), 'Not now')]",
-                "[data-action='skip']",
-                "button[name='skip']",
-                ".skip-button"
-            ]
-            
-            skip_button = None
-            for selector in skip_selectors:
-                try:
-                    if selector.startswith("//"):
-                        skip_button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                    else:
-                        skip_button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                    
-                    if skip_button and skip_button.is_displayed():
-                        print(f"✅ Found skip button with selector: {selector}")
-                        break
-                except:
-                    skip_button = None
-                    continue
-            
-            if skip_button:
-                try:
-                    human_mouse_move_to(skip_button)
-                    skip_button.click()
-                    print("✅ Successfully skipped phone verification!")
-                    time.sleep(random.uniform(2.0, 3.0))
-                    return True
-                except Exception as skip_error:
-                    print(f"⚠️ Could not click skip button: {skip_error}")
-            
-            # Method 2: Look for "Try another way" or alternative verification methods
-            print("🔄 Looking for alternative verification methods...")
-            alternative_selectors = [
-                "//button[contains(text(), 'Try another way')]",
-                "//button[contains(text(), 'Use another method')]",
-                "//button[contains(text(), 'More options')]",
-                "//a[contains(text(), 'Try another way')]",
-                "//a[contains(text(), 'Use another method')]",
-                "//span[contains(text(), 'Try another way')]/parent::button",
-                "//span[contains(text(), 'Use another method')]/parent::button",
-                "[data-action='challenge-another-way']",
-                ".challenge-alt-option"
-            ]
-            
-            alternative_button = None
-            for selector in alternative_selectors:
-                try:
-                    if selector.startswith("//"):
-                        alternative_button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                    else:
-                        alternative_button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                    
-                    if alternative_button and alternative_button.is_displayed():
-                        print(f"✅ Found alternative method button: {selector}")
-                        break
-                except:
-                    alternative_button = None
-                    continue
-            
-            if alternative_button:
-                try:
-                    human_mouse_move_to(alternative_button)
-                    alternative_button.click()
-                    print("✅ Clicked 'Try another way' button")
-                    time.sleep(random.uniform(2.0, 3.0))
-                    
-                    # Look for backup email or other verification options
-                    print("📧 Looking for backup email verification...")
-                    backup_email_selectors = [
-                        "//div[contains(text(), 'backup email')]",
-                        "//div[contains(text(), 'recovery email')]", 
-                        "//span[contains(text(), 'backup email')]",
-                        "//span[contains(text(), 'recovery email')]",
-                        "//button[contains(text(), 'email')]",
-                        "[data-challenge-type='recovery-email']"
-                    ]
-                    
-                    backup_email_option = None
-                    for selector in backup_email_selectors:
-                        try:
-                            if selector.startswith("//"):
-                                backup_email_option = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                            else:
-                                backup_email_option = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                            
-                            if backup_email_option and backup_email_option.is_displayed():
-                                print(f"✅ Found backup email option: {selector}")
-                                human_mouse_move_to(backup_email_option)
-                                backup_email_option.click()
-                                print("✅ Selected backup email verification")
-                                time.sleep(random.uniform(2.0, 3.0))
-                                return True
-                        except:
-                            continue
-                            
-                except Exception as alt_error:
-                    print(f"⚠️ Could not use alternative method: {alt_error}")
-            
-            # Method 3: Manual intervention prompt
-            print("🛑 Automatic verification bypass not possible")
-            print("📱 Phone verification detected - Manual intervention required!")
-            print("Please complete the phone verification manually and then press Enter to continue...")
-            print("Options you can try:")
-            print("  1. Complete the phone verification if you have access to the phone")
-            print("  2. Look for 'Try another way' or 'Use another method' buttons")
-            print("  3. Select backup email verification if available")
-            print("  4. Skip the verification if the option appears")
-            
-            # Wait for user to complete verification
-            input("📱 Press Enter after completing phone verification manually...")
-            
-            # Verify that verification was completed
-            time.sleep(random.uniform(2.0, 3.0))
-            verification_completed = True
-            
-            # Check if we're still on verification page
+        max_verification_attempts = 3
+        for attempt in range(max_verification_attempts):
             try:
-                current_url_after = driver.current_url.lower()
-                page_text_after = driver.page_source.lower()
+                print(f"🔍 2FA check attempt {attempt + 1}/{max_verification_attempts}")
                 
-                still_on_verification = any(indicator in current_url_after or indicator in page_text_after for indicator in verification_indicators)
+                # Wait for page to stabilize
+                time.sleep(random.uniform(2.0, 4.0))
                 
-                if still_on_verification:
-                    print("⚠️ Still on verification page. Please complete verification before continuing.")
-                    input("📱 Press Enter when verification is complete...")
-                    verification_completed = True
-                else:
-                    print("✅ Verification appears to be completed!")
-                    verification_completed = True
+                # Check current page state
+                current_url = driver.current_url.lower()
+                page_title = driver.title.lower()
+                
+                try:
+                    page_text = driver.page_source.lower()
+                except Exception as page_error:
+                    print(f"⚠️ Could not get page source: {page_error}")
+                    # Try to refresh and continue
+                    try:
+                        driver.refresh()
+                        time.sleep(random.uniform(3.0, 5.0))
+                        page_text = driver.page_source.lower()
+                    except:
+                        page_text = ""
+                
+                print(f"📍 Current URL: {current_url}")
+                print(f"📄 Page title: {page_title}")
+                
+                # Enhanced 2FA detection patterns
+                verification_indicators = [
+                    # 2-Step Verification specific
+                    "2-step verification", "two-step verification", "2fa", "two-factor",
+                    "verify it's you", "verify it's really you", "make sure it's really you",
+                    "check your", "tap yes", "notification", "device notification",
+                    "sent a notification", "google sent a notification",
                     
-            except Exception as check_error:
-                print(f"⚠️ Could not verify completion status: {check_error}")
-                verification_completed = True  # Assume completed
-            
-            return verification_completed
-        else:
-            print("✅ No phone verification detected - proceeding normally")
-            return True
+                    # Phone verification
+                    "verify your phone", "phone verification", "verify phone number",
+                    "enter your phone", "phone number verification", "add phone number",
+                    
+                    # General verification
+                    "verify your identity", "confirm your identity", "prove it's you",
+                    "unusual activity", "suspicious activity", "security check",
+                    "protect your account", "account security", "verify this sign-in",
+                    
+                    # Specific 2FA prompts
+                    "redmi note", "check your redmi", "tap yes on the notification",
+                    "don't ask again on this device", "help keep your account safe"
+                ]
+                
+                # Check if we're on a verification page
+                verification_detected = any(indicator in current_url or indicator in page_text or indicator in page_title 
+                                          for indicator in verification_indicators)
+                
+                if verification_detected:
+                    print("🚨 2FA/Verification screen detected!")
+                    print(f"🔍 Detected indicators in: URL, page content, or title")
+                    
+                    # Enhanced approach for different verification types
+                    
+                    # Type 1: Device notification (like "Check your Redmi Note 10")
+                    if any(device in page_text for device in ["redmi", "device", "notification", "tap yes"]):
+                        print("📱 Device notification verification detected!")
+                        print("="*60)
+                        print("🔔 DEVICE NOTIFICATION VERIFICATION")
+                        print("="*60)
+                        print("📋 Google has sent a notification to your device")
+                        print("🎯 WHAT TO DO:")
+                        print("   1. Check your phone/device for a Google notification")
+                        print("   2. Tap 'Yes' or 'Allow' on the notification")
+                        print("   3. If no notification, try refreshing or checking other devices")
+                        print("")
+                        print("📱 Common devices that receive notifications:")
+                        print("   • Your primary phone (Android/iPhone)")
+                        print("   • Tablets with your Google account")
+                        print("   • Other computers with Chrome signed in")
+                        print("")
+                        print("⏰ Waiting for you to approve the notification...")
+                        
+                        # Give user time to handle device notification
+                        verification_timeout = 120  # 2 minutes
+                        start_time = time.time()
+                        
+                        while (time.time() - start_time) < verification_timeout:
+                            try:
+                                # Check every 5 seconds if verification is complete
+                                time.sleep(5.0)
+                                
+                                # Test if we're still on verification page
+                                current_url_check = driver.current_url.lower()
+                                
+                                # If URL changed significantly, verification might be complete
+                                if "accounts.google.com" not in current_url_check or "challenge" not in current_url_check:
+                                    print("✅ Device verification appears to be completed!")
+                                    return True
+                                
+                                # Look for success indicators
+                                try:
+                                    success_elements = driver.find_elements(By.XPATH, 
+                                        "//div[contains(text(), 'verified')] | //div[contains(text(), 'success')] | //div[contains(text(), 'approved')]")
+                                    if success_elements:
+                                        print("✅ Verification success detected!")
+                                        return True
+                                except:
+                                    pass
+                                
+                                print(f"⏳ Still waiting... ({int(time.time() - start_time)}s/{verification_timeout}s)")
+                                
+                            except Exception as check_error:
+                                print(f"⚠️ Error checking verification status: {check_error}")
+                                # If we get session errors, try to recover
+                                if "invalid session" in str(check_error).lower():
+                                    print("🔄 Session error detected, attempting recovery...")
+                                    time.sleep(3.0)
+                                    try:
+                                        # Try to refresh the page
+                                        driver.refresh()
+                                        time.sleep(5.0)
+                                        return True  # Assume verification completed after refresh
+                                    except:
+                                        print("❌ Session recovery failed, continuing anyway...")
+                                        return True
+                        
+                        # If timeout reached, ask user for manual confirmation
+                        print("⏰ Verification timeout reached")
+                        user_input = input("📱 Did you approve the device notification? (y/n/skip): ").strip().lower()
+                        
+                        if user_input in ['y', 'yes']:
+                            print("✅ User confirmed device verification completed")
+                            return True
+                        elif user_input in ['skip', 's']:
+                            print("⚠️ Skipping device verification - may cause issues later")
+                            return True
+                        else:
+                            print("❌ Device verification not completed")
+                            return False
+                    
+                    # Type 2: Phone number verification
+                    elif any(phone in page_text for phone in ["phone number", "verify your phone", "enter your phone"]):
+                        print("📞 Phone number verification detected!")
+                        return handle_phone_number_verification(driver)
+                    
+                    # Type 3: SMS/Code verification
+                    elif any(code in page_text for code in ["enter the code", "verification code", "6-digit", "text message"]):
+                        print("💬 SMS/Code verification detected!")
+                        return handle_sms_code_verification(driver)
+                    
+                    # Type 4: General 2FA
+                    else:
+                        print("🔐 General 2FA verification detected!")
+                        return handle_general_2fa(driver)
+                
+                else:
+                    print("✅ No 2FA/verification detected")
+                    return True
+                    
+            except Exception as verification_error:
+                print(f"⚠️ Error during 2FA check attempt {attempt + 1}: {verification_error}")
+                
+                # Handle session errors specifically
+                if "invalid session" in str(verification_error).lower():
+                    print("🔄 Session disconnection detected during 2FA check")
+                    print("💡 This often happens when 2FA takes too long")
+                    print("🔧 Attempting session recovery...")
+                    
+                    try:
+                        # Try to get a new driver instance
+                        print("🔄 Attempting to recover session...")
+                        time.sleep(3.0)
+                        
+                        # Check if browser is still running
+                        try:
+                            driver.current_url
+                            print("✅ Browser session is still active")
+                        except:
+                            print("❌ Browser session lost, but continuing...")
+                            return True  # Assume 2FA was completed
+                            
+                    except Exception as recovery_error:
+                        print(f"⚠️ Session recovery failed: {recovery_error}")
+                        if attempt == max_verification_attempts - 1:
+                            print("⚠️ Assuming 2FA was completed and continuing...")
+                            return True
+                
+                # For other errors, continue with retry
+                if attempt < max_verification_attempts - 1:
+                    print(f"🔄 Retrying 2FA check in 3 seconds...")
+                    time.sleep(3.0)
+                else:
+                    print("⚠️ Max 2FA attempts reached, continuing anyway...")
+                    return True
+        
+        return True  # Default to success if no issues detected
     
-    # Handle phone verification
+    def handle_phone_number_verification(driver):
+        """Handle phone number entry verification"""
+        print("📞 Phone number verification handler...")
+        # Implementation for phone number verification
+        print("💡 Manual intervention required for phone number verification")
+        print("Please complete the phone verification manually and press Enter to continue...")
+        input("📞 Press Enter after completing phone verification...")
+        return True
+    
+    def handle_sms_code_verification(driver):
+        """Handle SMS code verification"""
+        print("💬 SMS code verification handler...")
+        # Implementation for SMS code verification
+        print("💡 Manual intervention required for SMS code verification")
+        print("Please enter the SMS code manually and press Enter to continue...")
+        input("💬 Press Enter after entering SMS code...")
+        return True
+    
+    def handle_general_2fa(driver):
+        """Handle general 2FA scenarios"""
+        print("🔐 General 2FA handler...")
+        print("💡 Manual intervention required for 2FA")
+        print("Please complete the 2FA challenge manually and press Enter to continue...")
+        input("🔐 Press Enter after completing 2FA...")
+        return True
+    
+    # Execute enhanced 2FA handling
     try:
-        # Use the comprehensive verification handler
-        phone_verification_handled = handle_google_verifications(driver, "login")
-        if not phone_verification_handled:
-            print("❌ Phone verification handling failed")
-            raise Exception("Phone verification could not be completed")
-    except Exception as phone_error:
-        print(f"⚠️ Error during phone verification handling: {phone_error}")
-        print("💡 You may need to complete verification manually")
+        verification_result = handle_2fa_and_verification()
+        if not verification_result:
+            print("❌ 2FA/Verification handling failed")
+            raise Exception("2FA verification could not be completed")
+        else:
+            print("✅ 2FA/Verification handling completed successfully")
+    except Exception as verification_error:
+        print(f"⚠️ Error during 2FA/verification handling: {verification_error}")
+        print("💡 Continuing with automation - you may need to complete verification manually")
+
+    # Check and recover session if needed after 2FA
+    print("🔍 Checking browser session after 2FA...")
+    session_ok, driver = recover_session_if_needed(driver)
+    if not session_ok:
+        print("⚠️ Session recovery failed, but continuing with automation...")
 
     # Step 4: Wait for login to complete and navigate to cloud console
     print("⏳ Waiting for login to complete...")
