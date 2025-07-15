@@ -5185,63 +5185,105 @@ try:
     print("📧 Using email:", EMAIL)
     print("📝 Using randomly generated project name:", PROJECT_NAME)
     
-    # Step 1: Go to login page
-    print("🌐 Navigating to Google login page...")
-    driver.get("https://accounts.google.com/signin/v2/identifier")
+    # Step 1: Go directly to Cloud Console (will redirect to login if needed)
+    print("🌐 Navigating directly to Google Cloud Console...")
+    driver.get("https://console.cloud.google.com")
 
     wait = WebDriverWait(driver, 20)
 
-    # Step 2: Type email
-    print("📝 Entering email...")
-    try:
-        email_input = wait.until(EC.presence_of_element_located((By.ID, "identifierId")))
-        human_mouse_move_to(email_input)
-        email_input.click()
-        time.sleep(random.uniform(0.5, 1.0))
-        email_input.clear()
-        human_typing(email_input, EMAIL)
-    except TimeoutException:
-        print("❌ Could not find email input field")
-        raise
+    # Step 2: Handle login if redirected to login page
+    print("🔍 Checking if login is required...")
+    current_url = driver.current_url.lower()
+    
+    if "accounts.google.com" in current_url or "signin" in current_url:
+        print("🔐 Login required - handling authentication...")
+        
+        # Step 2a: Type email
+        print("📝 Entering email...")
+        try:
+            email_input = wait.until(EC.presence_of_element_located((By.ID, "identifierId")))
+            human_mouse_move_to(email_input)
+            email_input.click()
+            time.sleep(random.uniform(0.5, 1.0))
+            email_input.clear()
+            human_typing(email_input, EMAIL)
+        except TimeoutException:
+            print("❌ Could not find email input field")
+            raise
 
-    # Click Next button
-    print("➡️ Clicking Next button...")
-    try:
-        next_btn = wait.until(EC.element_to_be_clickable((By.ID, "identifierNext")))
-        human_mouse_move_to(next_btn)
-        next_btn.click()
-    except TimeoutException:
-        print("❌ Could not find or click Next button")
-        raise
+        # Click Next button
+        print("➡️ Clicking Next button...")
+        try:
+            next_btn = wait.until(EC.element_to_be_clickable((By.ID, "identifierNext")))
+            human_mouse_move_to(next_btn)
+            next_btn.click()
+        except TimeoutException:
+            print("❌ Could not find or click Next button")
+            raise
 
-    time.sleep(random.uniform(1.0, 2.0))
+        time.sleep(random.uniform(1.0, 2.0))
 
-    # Step 3: Type password
-    print("🔒 Entering password...")
-    try:
-        password_input = wait.until(EC.presence_of_element_located((By.NAME, "Passwd")))
-        human_mouse_move_to(password_input)
-        password_input.click()
-        time.sleep(random.uniform(0.5, 1.0))
-        password_input.clear()
-        human_typing(password_input, PASSWORD)
-    except TimeoutException:
-        print("❌ Could not find password input field")
-        raise
+        # Step 2b: Type password
+        print("🔒 Entering password...")
+        try:
+            password_input = wait.until(EC.presence_of_element_located((By.NAME, "Passwd")))
+            human_mouse_move_to(password_input)
+            password_input.click()
+            time.sleep(random.uniform(0.5, 1.0))
+            password_input.clear()
+            human_typing(password_input, PASSWORD)
+        except TimeoutException:
+            print("❌ Could not find password input field")
+            raise
 
-    # Click Password Next button
-    print("➡️ Clicking Password Next button...")
-    try:
-        pass_btn = wait.until(EC.element_to_be_clickable((By.ID, "passwordNext")))
-        human_mouse_move_to(pass_btn)
-        pass_btn.click()
-    except TimeoutException:
-        print("❌ Could not find or click Password Next button")
-        raise
+        # Click Password Next button
+        print("➡️ Clicking Password Next button...")
+        try:
+            pass_btn = wait.until(EC.element_to_be_clickable((By.ID, "passwordNext")))
+            human_mouse_move_to(pass_btn)
+            pass_btn.click()
+        except TimeoutException:
+            print("❌ Could not find or click Password Next button")
+            raise
 
-    # Step 3.5: Enhanced 2FA and phone verification handling
-    print("📱 Checking for 2FA and phone verification prompts...")
-    time.sleep(random.uniform(3.0, 5.0))  # Wait longer for potential verification screen
+        # Step 2c: Enhanced 2FA and phone verification handling
+        print("📱 Checking for 2FA and phone verification prompts...")
+        time.sleep(random.uniform(3.0, 5.0))  # Wait longer for potential verification screen
+        
+        # Execute enhanced 2FA handling
+        try:
+            verification_result = handle_2fa_and_verification()
+            if not verification_result:
+                print("❌ 2FA/Verification handling failed")
+                raise Exception("2FA verification could not be completed")
+            else:
+                print("✅ 2FA/Verification handling completed successfully")
+        except Exception as verification_error:
+            print(f"⚠️ Error during 2FA/verification handling: {verification_error}")
+            print("💡 Continuing with automation - you may need to complete verification manually")
+
+        # Check and recover session if needed after 2FA
+        print("🔍 Checking browser session after 2FA...")
+        session_ok, driver = recover_session_if_needed(driver)
+        if not session_ok:
+            print("⚠️ Session recovery failed, but continuing with automation...")
+
+        # Step 2d: Wait for login to complete and check if we're redirected to Cloud Console
+        print("⏳ Waiting for login to complete...")
+        time.sleep(random.uniform(3.0, 5.0))
+        
+        current_url_after_login = driver.current_url
+        print(f"📍 URL after login: {current_url_after_login}")
+        
+        if "console.cloud.google.com" not in current_url_after_login:
+            print("🔄 Not automatically redirected to Cloud Console, navigating manually...")
+            driver.get("https://console.cloud.google.com")
+            time.sleep(random.uniform(3.0, 5.0))
+        
+    else:
+        print("✅ Already logged in or on Cloud Console!")
+
+    # Step 3: Handle any remaining verifications or terms of service
     
     def handle_2fa_and_verification():
         """Enhanced handler for Google 2FA and phone verification scenarios"""
@@ -5466,28 +5508,6 @@ try:
         input("🔐 Press Enter after completing 2FA...")
         return True
     
-    # Execute enhanced 2FA handling
-    try:
-        verification_result = handle_2fa_and_verification()
-        if not verification_result:
-            print("❌ 2FA/Verification handling failed")
-            raise Exception("2FA verification could not be completed")
-        else:
-            print("✅ 2FA/Verification handling completed successfully")
-    except Exception as verification_error:
-        print(f"⚠️ Error during 2FA/verification handling: {verification_error}")
-        print("💡 Continuing with automation - you may need to complete verification manually")
-
-    # Check and recover session if needed after 2FA
-    print("🔍 Checking browser session after 2FA...")
-    session_ok, driver = recover_session_if_needed(driver)
-    if not session_ok:
-        print("⚠️ Session recovery failed, but continuing with automation...")
-
-    # Step 4: Wait for login to complete and navigate to cloud console
-    print("⏳ Waiting for login to complete...")
-    time.sleep(random.uniform(3.0, 5.0))  # Need to wait for login completion
-    
     # Check for Google Play Console Terms of Service (first-time login)
     print("🔍 Checking for Google Play Console Terms of Service...")
     current_url = driver.current_url
@@ -5633,8 +5653,7 @@ try:
             print(f"⚠️ Error handling Terms of Service: {tos_error}")
             print("💡 You may need to manually complete the Terms of Service agreement")
     
-    print("☁️ Navigating to Google Cloud Console...")
-    driver.get("https://console.cloud.google.com")
+    print("☁️ Verifying Cloud Console access...")
     
     # Wait for Cloud Console to load and check if we're on the right page
     print("⏳ Waiting for Cloud Console to load...")
