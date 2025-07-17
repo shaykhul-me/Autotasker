@@ -383,7 +383,7 @@ A: Yes, it uses legitimate Google APIs and follows automation best practices.
 
 ## 🌟 Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yourusername/AutoTasker&type=Date)](https://star-history.com/#yourusername/AutoTasker&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=shaykhul-me/AutoTasker&type=Date)](https://star-history.com/#yourusername/AutoTasker&Date)
 
 ---
 
