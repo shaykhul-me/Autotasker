@@ -22,6 +22,10 @@ import psutil
 # Disable PyAutoGUI fail-safe to prevent mouse corner trigger
 pyautogui.FAILSAFE = False
 
+# Performance Configuration
+FAST_MODE = True  # Ultra fast mode - reduces all delays
+DISABLE_MOUSE_MOVEMENT = True  # Disable mouse movement for faster execution
+
 # Generate unique instance ID for this script run
 INSTANCE_ID = str(uuid.uuid4())[:8]
 INSTANCE_TIMESTAMP = int(time.time())
@@ -195,11 +199,11 @@ def print_milestone_timing(milestone_name):
 def fast_sleep(min_time, max_time):
     """Sleep with reduced timing for fast mode"""
     if FAST_MODE:
-        # Reduce all timings by 80%
-        min_time = min_time * 0.2
-        max_time = max_time * 0.2
-        # Minimum sleep of 0.1 seconds
-        min_time = max(0.1, min_time)
+        # Reduce all timings by 90% for ultra fast mode
+        min_time = min_time * 0.1
+        max_time = max_time * 0.1
+        # Minimum sleep of 0.05 seconds
+        min_time = max(0.05, min_time)
         max_time = max(0.1, max_time)
     time.sleep(random.uniform(min_time, max_time))
 
@@ -215,6 +219,10 @@ def human_typing(element, text):
 
 def human_mouse_move_to(element):
     """Simulate human-like mouse movement to an element with enhanced safety"""
+    # Skip mouse movement if disabled for performance
+    if DISABLE_MOUSE_MOVEMENT:
+        return
+        
     try:
         # Scroll element into view first
         driver.execute_script("arguments[0].scrollIntoView(true);", element)
@@ -285,7 +293,10 @@ def smart_click(driver, element, method="auto"):
         
         # Scroll to element
         driver.execute_script("arguments[0].scrollIntoView(true);", element)
-        time.sleep(random.uniform(0.5, 1.0))
+        if FAST_MODE:
+            time.sleep(random.uniform(0.1, 0.3))
+        else:
+            time.sleep(random.uniform(0.5, 1.0))
         
         if method == "auto" or method == "js":
             # Try JavaScript click first (bypasses most overlays)
@@ -299,9 +310,8 @@ def smart_click(driver, element, method="auto"):
                     return False
         
         if method == "auto" or method == "regular":
-            # Try regular click
+            # Try regular click (no mouse movement needed)
             try:
-                human_mouse_move_to(element)
                 element.click()
                 print("✅ Element clicked with regular click")
                 return True
@@ -935,13 +945,19 @@ def find_element_by_selectors(driver, selectors, element_name):
 def click_element(driver, element, element_name):
     """Click an element with fallback strategies and overlay handling"""
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    time.sleep(random.uniform(1.0, 2.0))
+    if FAST_MODE:
+        time.sleep(random.uniform(0.1, 0.3))
+    else:
+        time.sleep(random.uniform(1.0, 2.0))
     
     try:
-        human_mouse_move_to(element)
+        # Remove mouse movement - just click directly
         element.click()
         print(f"✅ {element_name} clicked successfully!")
-        time.sleep(random.uniform(0.5, 1.0))  # Reduced wait time for clicks
+        if FAST_MODE:
+            time.sleep(random.uniform(0.1, 0.3))
+        else:
+            time.sleep(random.uniform(0.5, 1.0))
         return True
     except ElementClickInterceptedException as intercept_error:
         print(f"⚠️ Click intercepted by overlay: {intercept_error}")
@@ -972,7 +988,10 @@ def click_element(driver, element, element_name):
                         except:
                             pass
             
-            time.sleep(random.uniform(0.5, 1.0))
+            if FAST_MODE:
+                time.sleep(random.uniform(0.1, 0.3))
+            else:
+                time.sleep(random.uniform(0.5, 1.0))
         except Exception as overlay_error:
             print(f"⚠️ Overlay handling failed: {overlay_error}")
         
@@ -980,7 +999,10 @@ def click_element(driver, element, element_name):
         try:
             driver.execute_script("arguments[0].click();", element)
             print(f"✅ {element_name} clicked successfully with JavaScript after overlay handling!")
-            time.sleep(random.uniform(0.5, 1.0))
+            if FAST_MODE:
+                time.sleep(random.uniform(0.1, 0.3))
+            else:
+                time.sleep(random.uniform(0.5, 1.0))
             return True
         except Exception as js_click_error:
             print(f"⚠️ JavaScript click failed: {js_click_error}")
@@ -996,7 +1018,10 @@ def click_element(driver, element, element_name):
         try:
             driver.execute_script("arguments[0].click();", element)
             print(f"✅ {element_name} clicked successfully with JavaScript!")
-            time.sleep(random.uniform(0.5, 1.0))  # Reduced wait time for clicks
+            if FAST_MODE:
+                time.sleep(random.uniform(0.1, 0.3))
+            else:
+                time.sleep(random.uniform(0.5, 1.0))
             return True
         except Exception as js_click_error:
             print(f"❌ JavaScript click also failed: {js_click_error}")
@@ -1047,11 +1072,17 @@ def fill_email_and_save(driver):
     
     # Fill email
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
-    time.sleep(random.uniform(1.0, 2.0))
+    if FAST_MODE:
+        time.sleep(random.uniform(0.1, 0.3))
+    else:
+        time.sleep(random.uniform(1.0, 2.0))
     
-    human_mouse_move_to(email_input)
+    # Remove mouse movement - just click directly
     email_input.click()
-    time.sleep(random.uniform(0.5, 1.0))
+    if FAST_MODE:
+        time.sleep(random.uniform(0.1, 0.3))
+    else:
+        time.sleep(random.uniform(0.5, 1.0))
     
     email_input.clear()
     test_email = EMAIL  # Use the actual inputted email
