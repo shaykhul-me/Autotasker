@@ -22,10 +22,6 @@ import psutil
 # Disable PyAutoGUI fail-safe to prevent mouse corner trigger
 pyautogui.FAILSAFE = False
 
-# Performance Configuration
-FAST_MODE = True  # Ultra fast mode - reduces all delays
-DISABLE_MOUSE_MOVEMENT = True  # Disable mouse movement for faster execution
-
 # Generate unique instance ID for this script run
 INSTANCE_ID = str(uuid.uuid4())[:8]
 INSTANCE_TIMESTAMP = int(time.time())
@@ -33,6 +29,191 @@ INSTANCE_TIMESTAMP = int(time.time())
 # Start timing the automation
 AUTOMATION_START_TIME = time.time()
 START_TIME_FORMATTED = time.strftime('%H:%M:%S', time.localtime(AUTOMATION_START_TIME))
+
+def dismiss_overlay(driver):
+    """Dismiss any overlay tooltips or popups that might intercept clicks"""
+    try:
+        # Try to find any visible tooltips or overlays
+        overlay_selectors = [
+            "//cfc-tooltip-overlay",
+            "//div[contains(@class, 'cdk-overlay-backdrop')]",
+            "//button[contains(@class, 'cfc-tooltip-close-button')]",
+            "//button[contains(@aria-label, 'Close')]",
+            "//div[contains(@class, 'tooltip')]//button[contains(@class, 'close')]",
+            "//mat-icon-button[contains(@aria-label, 'Close')]"
+        ]
+        
+        for selector in overlay_selectors:
+            try:
+                overlays = driver.find_elements(By.XPATH, selector)
+                for overlay in overlays:
+                    if overlay.is_displayed():
+                        # Try multiple methods to close the overlay
+                        try:
+                            # Try clicking the close button if it exists
+                            close_buttons = driver.find_elements(By.XPATH, 
+                                f"{selector}//button[contains(@aria-label, 'Close')] | {selector}//cm-icon[contains(@data-icon-name, 'closeIcon')]/..")
+                            for close_btn in close_buttons:
+                                if close_btn.is_displayed():
+                                    driver.execute_script("arguments[0].click();", close_btn)
+                                    print("✅ Closed tooltip overlay via close button")
+                                    time.sleep(0.5)
+                                    return True
+                        except:
+                            pass
+                        
+                        try:
+                            # Try to remove the overlay directly
+                            driver.execute_script("arguments[0].remove();", overlay)
+                            print("✅ Removed tooltip overlay via JavaScript")
+                            time.sleep(0.5)
+                            return True
+                        except:
+                            pass
+                        
+                        try:
+                            # Try to hide the overlay
+                            driver.execute_script("arguments[0].style.display = 'none';", overlay)
+                            print("✅ Hidden tooltip overlay via JavaScript")
+                            time.sleep(0.5)
+                            return True
+                        except:
+                            pass
+            except:
+                continue
+                
+        # Try to remove any backdrop that might be blocking clicks
+        try:
+            backdrops = driver.find_elements(By.CLASS_NAME, "cdk-overlay-backdrop")
+            for backdrop in backdrops:
+                if backdrop.is_displayed():
+                    driver.execute_script("arguments[0].remove();", backdrop)
+                    print("✅ Removed blocking backdrop")
+                    time.sleep(0.5)
+                    return True
+        except:
+            pass
+            
+        return False
+    except Exception as e:
+        print(f"⚠️ Error while trying to dismiss overlay: {e}")
+        return False
+
+def safe_click(driver, element, description="element"):
+    """Safely click an element by first checking and dismissing any overlays"""
+    try:
+        # First try normal click
+        try:
+            element.click()
+            print(f"✅ Clicked {description} normally")
+            return True
+        except Exception as e:
+            if "element click intercepted" in str(e) or "element not clickable" in str(e):
+                print(f"⚠️ Click intercepted, attempting to dismiss overlay...")
+                
+                # Try to dismiss any overlays
+                dismiss_overlay(driver)
+                time.sleep(1)  # Wait for overlay to be dismissed
+                
+                # Try clicking again
+                try:
+                    element.click()
+                    print(f"✅ Clicked {description} after dismissing overlay")
+                    return True
+                except:
+                    # If still fails, try JavaScript click
+                    try:
+                        driver.execute_script("arguments[0].click();", element)
+                        print(f"✅ Clicked {description} using JavaScript")
+                        return True
+                    except Exception as js_error:
+                        print(f"❌ Failed to click {description} even after dismissing overlay: {js_error}")
+                        return False
+            else:
+                print(f"❌ Error clicking {description}: {e}")
+                return False
+    except Exception as e:
+        print(f"❌ Error in safe_click for {description}: {e}")
+        return False
+
+def handle_2fa_and_verification(driver):
+    """Handle 2FA and verification prompts during login"""
+    print("🔒 Checking for 2FA/verification prompts...")
+    try:
+        # Handle phone number verification
+        try:
+            phone_input = driver.find_element(By.XPATH, "//input[@type='tel' or @aria-label='Phone number']")
+            if phone_input and phone_input.is_displayed():
+                print("📱 Phone number verification detected")
+                print("💡 Please enter your phone number manually")
+                time.sleep(30)  # Give time for manual input
+        except:
+            pass
+
+        # Handle SMS code verification
+        try:
+            code_input = driver.find_element(By.XPATH, "//input[@type='tel' or @aria-label='Enter code']")
+            if code_input and code_input.is_displayed():
+                print("🔑 SMS code verification detected")
+                print("💡 Please enter the verification code manually")
+                time.sleep(30)  # Give time for manual input
+        except:
+            pass
+
+        # Check for "Try another way" button
+        try:
+            another_way_btn = driver.find_element(By.XPATH, "//span[contains(text(), 'Try another way')]/..")
+            if another_way_btn and another_way_btn.is_displayed():
+                print("🔄 'Try another way' button found")
+                another_way_btn.click()
+                time.sleep(5)
+        except:
+            pass
+
+        print("✅ 2FA/verification handling completed")
+        return True
+    except Exception as e:
+        print(f"⚠️ Error during 2FA/verification handling: {e}")
+        print("💡 Manual intervention may be required for 2FA/verification")
+        return False
+
+def open_project_picker(driver, wait):
+    """Open the project picker using UI elements"""
+    print("🔍 Opening project picker via UI...")
+    try:
+        picker_selectors = [
+            "//button[contains(@class, 'cfc-switcher-button')]",
+            "//button[contains(@aria-label, 'Select a project')]",
+            "//button[contains(@class, 'project-picker')]",
+            "//button[contains(@class, 'mat-mdc-button-base')]//span[contains(text(), 'project')]/..",
+            "//button[@aria-haspopup='menu' and contains(@class, 'mat-mdc-button-base')]",
+            "//header//button[contains(@class, 'project')]",
+            f"//span[contains(text(), '{PROJECT_NAME}')]"
+        ]
+        
+        picker_btn = None
+        for selector in picker_selectors:
+            try:
+                picker_btn = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                if picker_btn:
+                    break
+            except:
+                continue
+        
+        if picker_btn:
+            time.sleep(random.uniform(1.0, 2.0))
+            driver.execute_script("arguments[0].scrollIntoView(true);", picker_btn)
+            time.sleep(random.uniform(0.5, 1.0))
+            driver.execute_script("arguments[0].click();", picker_btn)
+            print("✅ Project picker opened via UI button!")
+            time.sleep(random.uniform(2.0, 3.0))
+            return True
+        
+        print("⚠️ Could not find project picker button")
+        return False
+    except Exception as e:
+        print(f"❌ Error opening project picker: {e}")
+        return False
 
 print(f"🏷️ Instance ID: {INSTANCE_ID}")
 print(f"⏰ Instance started at: {START_TIME_FORMATTED}")
@@ -199,11 +380,11 @@ def print_milestone_timing(milestone_name):
 def fast_sleep(min_time, max_time):
     """Sleep with reduced timing for fast mode"""
     if FAST_MODE:
-        # Reduce all timings by 90% for ultra fast mode
-        min_time = min_time * 0.1
-        max_time = max_time * 0.1
-        # Minimum sleep of 0.05 seconds
-        min_time = max(0.05, min_time)
+        # Reduce all timings by 80%
+        min_time = min_time * 0.2
+        max_time = max_time * 0.2
+        # Minimum sleep of 0.1 seconds
+        min_time = max(0.1, min_time)
         max_time = max(0.1, max_time)
     time.sleep(random.uniform(min_time, max_time))
 
@@ -219,10 +400,6 @@ def human_typing(element, text):
 
 def human_mouse_move_to(element):
     """Simulate human-like mouse movement to an element with enhanced safety"""
-    # Skip mouse movement if disabled for performance
-    if DISABLE_MOUSE_MOVEMENT:
-        return
-        
     try:
         # Scroll element into view first
         driver.execute_script("arguments[0].scrollIntoView(true);", element)
@@ -293,10 +470,7 @@ def smart_click(driver, element, method="auto"):
         
         # Scroll to element
         driver.execute_script("arguments[0].scrollIntoView(true);", element)
-        if FAST_MODE:
-            time.sleep(random.uniform(0.1, 0.3))
-        else:
-            time.sleep(random.uniform(0.5, 1.0))
+        time.sleep(random.uniform(0.5, 1.0))
         
         if method == "auto" or method == "js":
             # Try JavaScript click first (bypasses most overlays)
@@ -310,8 +484,9 @@ def smart_click(driver, element, method="auto"):
                     return False
         
         if method == "auto" or method == "regular":
-            # Try regular click (no mouse movement needed)
+            # Try regular click
             try:
+                human_mouse_move_to(element)
                 element.click()
                 print("✅ Element clicked with regular click")
                 return True
@@ -945,19 +1120,13 @@ def find_element_by_selectors(driver, selectors, element_name):
 def click_element(driver, element, element_name):
     """Click an element with fallback strategies and overlay handling"""
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    if FAST_MODE:
-        time.sleep(random.uniform(0.1, 0.3))
-    else:
-        time.sleep(random.uniform(1.0, 2.0))
+    time.sleep(random.uniform(1.0, 2.0))
     
     try:
-        # Remove mouse movement - just click directly
+        human_mouse_move_to(element)
         element.click()
         print(f"✅ {element_name} clicked successfully!")
-        if FAST_MODE:
-            time.sleep(random.uniform(0.1, 0.3))
-        else:
-            time.sleep(random.uniform(0.5, 1.0))
+        time.sleep(random.uniform(0.5, 1.0))  # Reduced wait time for clicks
         return True
     except ElementClickInterceptedException as intercept_error:
         print(f"⚠️ Click intercepted by overlay: {intercept_error}")
@@ -988,10 +1157,7 @@ def click_element(driver, element, element_name):
                         except:
                             pass
             
-            if FAST_MODE:
-                time.sleep(random.uniform(0.1, 0.3))
-            else:
-                time.sleep(random.uniform(0.5, 1.0))
+            time.sleep(random.uniform(0.5, 1.0))
         except Exception as overlay_error:
             print(f"⚠️ Overlay handling failed: {overlay_error}")
         
@@ -999,10 +1165,7 @@ def click_element(driver, element, element_name):
         try:
             driver.execute_script("arguments[0].click();", element)
             print(f"✅ {element_name} clicked successfully with JavaScript after overlay handling!")
-            if FAST_MODE:
-                time.sleep(random.uniform(0.1, 0.3))
-            else:
-                time.sleep(random.uniform(0.5, 1.0))
+            time.sleep(random.uniform(0.5, 1.0))
             return True
         except Exception as js_click_error:
             print(f"⚠️ JavaScript click failed: {js_click_error}")
@@ -1018,10 +1181,7 @@ def click_element(driver, element, element_name):
         try:
             driver.execute_script("arguments[0].click();", element)
             print(f"✅ {element_name} clicked successfully with JavaScript!")
-            if FAST_MODE:
-                time.sleep(random.uniform(0.1, 0.3))
-            else:
-                time.sleep(random.uniform(0.5, 1.0))
+            time.sleep(random.uniform(0.5, 1.0))  # Reduced wait time for clicks
             return True
         except Exception as js_click_error:
             print(f"❌ JavaScript click also failed: {js_click_error}")
@@ -1072,17 +1232,11 @@ def fill_email_and_save(driver):
     
     # Fill email
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
-    if FAST_MODE:
-        time.sleep(random.uniform(0.1, 0.3))
-    else:
-        time.sleep(random.uniform(1.0, 2.0))
+    time.sleep(random.uniform(1.0, 2.0))
     
-    # Remove mouse movement - just click directly
+    human_mouse_move_to(email_input)
     email_input.click()
-    if FAST_MODE:
-        time.sleep(random.uniform(0.1, 0.3))
-    else:
-        time.sleep(random.uniform(0.5, 1.0))
+    time.sleep(random.uniform(0.5, 1.0))
     
     email_input.clear()
     test_email = EMAIL  # Use the actual inputted email
