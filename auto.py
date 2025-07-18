@@ -140,6 +140,9 @@ def handle_2fa_and_verification(driver):
     """Handle 2FA and verification prompts during login"""
     print("🔒 Checking for 2FA/verification prompts...")
     try:
+        # Handle 2FA popup that asks to turn on two-step verification
+        handle_2fa_popup(driver)
+        
         # Handle phone number verification
         try:
             phone_input = driver.find_element(By.XPATH, "//input[@type='tel' or @aria-label='Phone number']")
@@ -175,6 +178,185 @@ def handle_2fa_and_verification(driver):
     except Exception as e:
         print(f"⚠️ Error during 2FA/verification handling: {e}")
         print("💡 Manual intervention may be required for 2FA/verification")
+        return False
+
+def handle_2fa_popup(driver):
+    """Handle the 2FA setup popup that appears after login"""
+    try:
+        print("🔍 Checking for 2FA setup popup...")
+        time.sleep(3)  # Wait for popup to appear
+        
+        # Look for the 2FA popup dialog
+        popup_indicators = [
+            "Turn on two-step verification (2SV)",
+            "Turn on two-step verification for your account",
+            "two-step verification",
+            "2SV",
+            "July 24, 2025 to keep accessing the Google Cloud console",
+            "July 25, 2025 to keep accessing the Google Cloud console"
+        ]
+        
+        page_source = driver.page_source
+        has_2fa_popup = any(indicator in page_source for indicator in popup_indicators)
+        
+        if has_2fa_popup:
+            print("📱 2FA setup popup detected!")
+            
+            # First try to dismiss by clicking outside the dialog
+            try:
+                print("🎯 Trying to click outside dialog to dismiss...")
+                # Click on the backdrop/overlay area
+                backdrop_selectors = [
+                    "//div[contains(@class, 'cdk-overlay-backdrop')]",
+                    "//div[contains(@class, 'mat-overlay-backdrop')]",
+                    "//div[contains(@class, 'cdk-overlay-container')]",
+                    "//div[contains(@class, 'cdk-global-overlay-wrapper')]"
+                ]
+                
+                for backdrop_selector in backdrop_selectors:
+                    try:
+                        backdrop = driver.find_element(By.XPATH, backdrop_selector)
+                        if backdrop.is_displayed():
+                            driver.execute_script("arguments[0].click();", backdrop)
+                            print("✅ Successfully dismissed popup by clicking backdrop!")
+                            time.sleep(2)
+                            return True
+                    except:
+                        continue
+            except Exception as backdrop_error:
+                print(f"⚠️ Backdrop click failed: {backdrop_error}")
+            
+            # Look for "Remind me later" button with enhanced selectors
+            remind_later_selectors = [
+                # Exact match for the provided HTML structure
+                "//button[@aria-label='Dismiss the dialogue']",
+                "//button[.//span[contains(@class, 'mdc-button__label') and text()='Remind me later']]",
+                "//span[contains(@class, 'mdc-button__label') and text()='Remind me later']/parent::button",
+                "//button[contains(@class, 'mat-unthemed') and .//span[text()='Remind me later']]",
+                "//div[contains(@class, 'mat-mdc-dialog-actions')]//button[.//span[text()='Remind me later']]",
+                
+                # More generic selectors
+                "//button[contains(text(), 'Remind me later')]",
+                "//span[text()='Remind me later']//ancestor::button[1]",
+                "//button[.//span[text()='Remind me later']]",
+                "//mat-dialog-actions//button[contains(text(), 'Remind me later')]",
+                "//button[contains(@class, 'mdc-button') and contains(text(), 'Remind me later')]",
+                
+                # Alternative dismiss buttons
+                "//button[contains(@aria-label, 'Dismiss')]",
+                "//button[contains(@aria-label, 'Close')]",
+                "//button[contains(@aria-label, 'Cancel')]",
+                "//button[@type='button' and contains(@class, 'mat-mdc-button')]"
+            ]
+            
+            remind_button = None
+            for selector in remind_later_selectors:
+                try:
+                    elements = driver.find_elements(By.XPATH, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            element_text = (element.get_attribute("textContent") or element.text or "").strip()
+                            aria_label = element.get_attribute("aria-label") or ""
+                            
+                            if ("remind me later" in element_text.lower() or 
+                                "dismiss the dialogue" in aria_label.lower() or
+                                element.get_attribute("aria-label") == "Dismiss the dialogue"):
+                                remind_button = element
+                                print(f"✅ Found 'Remind me later' button: {element_text} (aria-label: {aria_label})")
+                                break
+                    if remind_button:
+                        break
+                except Exception as selector_error:
+                    continue
+            
+            if remind_button:
+                print("🎯 Clicking 'Remind me later' button...")
+                try:
+                    # Scroll to button first
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", remind_button)
+                    time.sleep(1)
+                    
+                    # Highlight button briefly for visibility
+                    try:
+                        driver.execute_script("arguments[0].style.outline = '3px solid red';", remind_button)
+                        time.sleep(1)
+                        driver.execute_script("arguments[0].style.outline = '';", remind_button)
+                    except:
+                        pass
+                    
+                    # Try JavaScript click first (most reliable for popups)
+                    driver.execute_script("arguments[0].click();", remind_button)
+                    print("✅ Successfully clicked 'Remind me later'!")
+                    time.sleep(3)  # Wait for popup to close
+                    return True
+                    
+                except Exception as click_error:
+                    print(f"⚠️ JavaScript click failed: {click_error}")
+                    try:
+                        # Try regular click as fallback
+                        remind_button.click()
+                        print("✅ Successfully clicked 'Remind me later' with regular click!")
+                        time.sleep(3)
+                        return True
+                    except Exception as regular_click_error:
+                        print(f"❌ Regular click also failed: {regular_click_error}")
+            
+            # If button click failed, try other methods
+            print("🔄 Trying alternative dismiss methods...")
+            
+            # Method 1: Press Escape key
+            try:
+                print("⌨️ Trying Escape key to dismiss popup...")
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                time.sleep(2)
+                print("✅ Dismissed 2FA popup with Escape key")
+                return True
+            except Exception as escape_error:
+                print(f"⚠️ Escape key failed: {escape_error}")
+            
+            # Method 2: Click on page background
+            try:
+                print("🎯 Trying to click on page background...")
+                # Click somewhere on the page that's not the dialog
+                driver.execute_script("document.elementFromPoint(100, 100).click();")
+                time.sleep(2)
+                print("✅ Dismissed popup by clicking background")
+                return True
+            except Exception as bg_click_error:
+                print(f"⚠️ Background click failed: {bg_click_error}")
+            
+            # Method 3: Try to remove the dialog element directly
+            try:
+                print("🗑️ Trying to remove dialog element...")
+                dialog_selectors = [
+                    "//div[contains(@class, 'mat-mdc-dialog-surface')]",
+                    "//ng-component[contains(@class, 'mat-mdc-dialog-component-host')]",
+                    "//div[contains(@class, 'cdk-overlay-container')]"
+                ]
+                
+                for dialog_selector in dialog_selectors:
+                    try:
+                        dialog = driver.find_element(By.XPATH, dialog_selector)
+                        if dialog.is_displayed():
+                            driver.execute_script("arguments[0].remove();", dialog)
+                            print("✅ Removed dialog element")
+                            time.sleep(2)
+                            return True
+                    except:
+                        continue
+                        
+            except Exception as remove_error:
+                print(f"⚠️ Dialog removal failed: {remove_error}")
+            
+            print("❌ Could not dismiss 2FA popup with any method")
+            print("💡 Manual intervention may be required")
+            return False
+        else:
+            print("✅ No 2FA setup popup detected")
+            return True
+            
+    except Exception as e:
+        print(f"⚠️ Error handling 2FA popup: {e}")
         return False
 
 def open_project_picker(driver, wait):
@@ -5486,6 +5668,10 @@ try:
 
     print_milestone_timing("✅ LOGIN COMPLETED")
 
+    # Handle 2FA setup popup immediately after login
+    print("🔍 Checking for 2FA setup popup after login...")
+    handle_2fa_popup(driver)
+    
     # Step 3: Handle any remaining verifications or terms of service
     
     def handle_2fa_and_verification():
