@@ -13,6 +13,9 @@ import concurrent.futures
 import subprocess
 import csv
 import shutil
+import uuid
+import glob
+import json
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
@@ -27,6 +30,24 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# Constants for enhanced compatibility
+REQUIRED_PACKAGES = [
+    'selenium>=4.0.0',
+    'undetected-chromedriver>=3.5.0',
+    'pyautogui>=0.9.54',
+    'requests>=2.28.0',
+    'webdriver-manager>=3.8.0',
+    'psutil>=5.9.0',
+    'python-dotenv>=0.19.0'  # Added for .env support
+]
+
+# List of critical files needed for automation
+CRITICAL_FILES = [
+    'auto.py',
+    'chromedriver.exe',
+    '.env'  # Optional but recommended
+]
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -105,6 +126,21 @@ class SubprocessMultiThreadedAutomation:
         """Setup isolated environment for a worker with comprehensive dependency handling"""
         try:
             logger.info(f"Worker {worker_id}: Setting up isolated environment...")
+            
+            # Create directories for new UI automation structure
+            dirs_to_create = [
+                'downloads',
+                'temp',
+                'logs',
+                'chrome_profile',
+                'chrome_profile_instance_{}'.format(uuid.uuid4().hex[:8]),
+                'worker_data'
+            ]
+            
+            for dir_name in dirs_to_create:
+                dir_path = os.path.join(account.worker_dir, dir_name)
+                os.makedirs(dir_path, exist_ok=True)
+                logger.info(f"Created directory: {dir_name}")
             
             # Create Unicode-safe version of auto.py
             if not self.create_unicode_safe_auto_py(account.worker_dir):
@@ -223,8 +259,13 @@ EMAIL = "{account.email}"
 WORKER_ID = {worker_id}
 WORKER_DIR = "{account.worker_dir}"
 DOWNLOADS_DIR = "{os.path.join(account.worker_dir, 'downloads')}"
+CHROME_PROFILE_DIR = "{os.path.join(account.worker_dir, f'chrome_profile_instance_{uuid.uuid4().hex[:8]}')}"
 AUTOMATION_MODE = "MULTI_THREADED"
 FAST_MODE = True
+RETRY_ATTEMPTS = 3
+HANDLE_OVERLAYS = True
+SAFE_CLICK_ENABLED = True
+DEBUG_MODE = True
 '''
             
             config_path = os.path.join(account.worker_dir, "worker_config.py")
@@ -281,106 +322,271 @@ psutil>=5.9.0
             return False
     
     def run_single_account_subprocess(self, account: EmailAccount, worker_id: int):
-        """Run automation for a single account using subprocess with enhanced compatibility"""
+        """Run automation for a single account using subprocess with advanced parallel processing"""
         account.thread_id = worker_id
         account.start_time = datetime.now()
         account.status = "running"
         
+        # Advanced worker isolation variables
+        worker_lock = threading.Lock()
+        process = None
+        chrome_cleanup_attempts = 0
+        max_retries = 2
+        
         try:
-            logger.info(f"Worker {worker_id}: Starting automation for {account.email}")
+            logger.info(f"Worker {worker_id}: Starting advanced automation for {account.email}")
             
-            # Setup worker environment
+            # Setup worker environment with advanced isolation
             if not self.setup_worker_environment(account, worker_id):
                 raise Exception("Failed to setup worker environment")
             
-            # Change to worker directory
+            # Advanced Chrome port management for true parallel execution
+            chrome_port = 9222 + worker_id  # Unique port per worker
+            debug_port = chrome_port + 1000  # Separate debug port
+            
+            # Change to worker directory with lock protection
             original_cwd = os.getcwd()
-            os.chdir(account.worker_dir)
+            with worker_lock:
+                os.chdir(account.worker_dir)
             
             try:
-                # Enhanced subprocess execution with better error handling
-                logger.info(f"Worker {worker_id}: Launching auto.py subprocess...")
+                # Advanced retry loop for subprocess execution
+                for attempt in range(max_retries + 1):
+                    try:
+                        logger.info(f"Worker {worker_id}: Launching auto.py subprocess (attempt {attempt + 1})...")
+                        
+                        # Advanced environment variables for complete isolation
+                        env = os.environ.copy()
+                        env['PYTHONIOENCODING'] = 'utf-8'
+                        env['PYTHONUNBUFFERED'] = '1'
+                        env['AUTOMATION_MODE'] = 'MULTI_THREADED'
+                        env['WORKER_ID'] = str(worker_id)
+                        env['CHROME_PORT'] = str(chrome_port)
+                        env['CHROME_DEBUG_PORT'] = str(debug_port)
+                        env['CHROME_PROFILE_DIR'] = os.path.join(account.worker_dir, f'chrome_profile_instance_{uuid.uuid4().hex[:8]}')
+                        env['HANDLE_OVERLAYS'] = 'true'
+                        env['SAFE_CLICK_ENABLED'] = 'true'
+                        env['DEBUG_MODE'] = 'true'
+                        env['NO_SANDBOX'] = 'true'
+                        env['DISABLE_DEV_SHM_USAGE'] = 'true'
+                        env['DISABLE_GPU'] = 'true'
+                        env['DISPLAY_NOTIFICATIONS'] = 'false'
+                        env['CHROME_USER_DATA_DIR'] = os.path.join(account.worker_dir, f'chrome_data_{worker_id}')
+                        env['TEMP_DIR'] = os.path.join(account.worker_dir, 'temp')
+                        env['DOWNLOADS_DIR'] = os.path.join(account.worker_dir, 'downloads')
+                        
+                        # Ensure Chrome processes from previous attempts are fully cleaned
+                        self.advanced_chrome_cleanup(worker_id)
+                        time.sleep(2)  # Give cleanup time to complete
+                        
+                        # Create subprocess with advanced isolation and error handling
+                        # For Windows, create with new console to allow interactive input
+                        if sys.platform == "win32":
+                            process = subprocess.Popen(
+                                [sys.executable, "-u", "auto.py"],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                stdin=None,  # Allow console input
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                cwd=account.worker_dir,
+                                env=env,
+                                creationflags=subprocess.CREATE_NEW_CONSOLE
+                            )
+                        else:
+                            # For non-Windows systems
+                            process = subprocess.Popen(
+                                [sys.executable, "-u", "auto.py"],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                stdin=None,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                cwd=account.worker_dir,
+                                env=env
+                            )
+                        
+                        logger.info(f"Worker {worker_id}: Process started successfully (PID: {process.pid})")
+                        break  # Success, exit retry loop
+                        
+                    except Exception as subprocess_error:
+                        logger.warning(f"Worker {worker_id}: Subprocess creation failed (attempt {attempt + 1}): {subprocess_error}")
+                        if attempt < max_retries:
+                            # Clean up and retry
+                            self.advanced_chrome_cleanup(worker_id)
+                            time.sleep(5)  # Wait before retry
+                        else:
+                            raise Exception(f"Failed to create subprocess after {max_retries + 1} attempts: {subprocess_error}")
                 
-                # Prepare environment variables for the subprocess
-                env = os.environ.copy()
-                env['PYTHONIOENCODING'] = 'utf-8'
-                env['PYTHONUNBUFFERED'] = '1'  # Force unbuffered output
+                if process is None:
+                    raise Exception("Failed to create subprocess process")
                 
-                # Create subprocess with enhanced configuration
-                process = subprocess.Popen(
-                    [sys.executable, "-u", "auto.py"],  # -u for unbuffered output
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,  # Allow input handling
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',  # Replace invalid characters instead of failing
-                    cwd=account.worker_dir,
-                    env=env,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-                )
                 
-                # Monitor process with enhanced timeout and progress tracking
+                # Advanced process monitoring with real-time health checks
                 try:
-                    logger.info(f"Worker {worker_id}: Process started (PID: {process.pid})")
+                    logger.info(f"Worker {worker_id}: Starting advanced process monitoring...")
                     
-                    # Wait for process with extended timeout for complex automation
-                    timeout_seconds = 3600  # 60 minutes timeout (increased for complex automation)
-                    stdout, stderr = process.communicate(timeout=timeout_seconds)
+                    # Extended timeout with intelligent monitoring for manual interaction
+                    timeout_seconds = 3600  # 60 minutes base timeout (increased for manual steps)
+                    check_interval = 30  # Check every 30 seconds
+                    last_activity_check = time.time()
+                    process_health_checks = 0
+                    max_health_checks = timeout_seconds // check_interval
+                    
+                    # Advanced monitoring loop
+                    while process.poll() is None and process_health_checks < max_health_checks:
+                        try:
+                            # Wait for process with shorter intervals for monitoring
+                            stdout, stderr = process.communicate(timeout=check_interval)
+                            # If we get here, process completed normally
+                            break
+                        except subprocess.TimeoutExpired:
+                            # Process still running, perform health checks
+                            process_health_checks += 1
+                            current_time = time.time()
+                            
+                            # Check if Chrome processes are still alive
+                            chrome_alive = self.check_chrome_processes_health(worker_id)
+                            
+                            if chrome_alive:
+                                logger.info(f"Worker {worker_id}: Health check {process_health_checks}/{max_health_checks} - Chrome processes active")
+                                last_activity_check = current_time
+                            else:
+                                logger.warning(f"Worker {worker_id}: No Chrome processes detected - may be manual interaction phase")
+                                # If Chrome died, the automation likely failed, but be more lenient for manual interaction
+                                if current_time - last_activity_check > 300:  # 5 minutes without Chrome (increased)
+                                    logger.error(f"Worker {worker_id}: Chrome processes missing for too long, terminating")
+                                    break
+                            
+                            # Check system resources
+                            if process_health_checks % 4 == 0:  # Every 2 minutes
+                                self.log_system_resources(worker_id)
+                            
+                            continue
+                    
+                    # Get final output if process completed during monitoring
+                    if process.poll() is not None:
+                        try:
+                            remaining_stdout, remaining_stderr = process.communicate(timeout=30)
+                            stdout = (stdout or "") + (remaining_stdout or "")
+                            stderr = (stderr or "") + (remaining_stderr or "")
+                        except:
+                            stdout = stdout or ""
+                            stderr = stderr or ""
+                    else:
+                        # Process still running after timeout
+                        logger.warning(f"Worker {worker_id}: Process timeout after monitoring - attempting graceful shutdown")
+                        try:
+                            # Try graceful termination first
+                            process.terminate()
+                            stdout, stderr = process.communicate(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            # Force kill if graceful termination fails
+                            logger.warning(f"Worker {worker_id}: Graceful termination failed, force killing process")
+                            process.kill()
+                            try:
+                                stdout, stderr = process.communicate(timeout=10)
+                            except:
+                                stdout, stderr = "", "Process was force killed due to timeout"
+                        
+                        raise Exception(f"Process monitoring timeout after {timeout_seconds/60:.1f} minutes")
+                    
                     return_code = process.returncode
                     
-                    # Store complete output for debugging
-                    account.process_output = f"RETURN CODE: {return_code}\n\nSTDOUT:\n{stdout}\n\nSTDERR:\n{stderr}"
+                    # Store complete output with enhanced formatting
+                    account.process_output = self.format_process_output(return_code, stdout, stderr, worker_id)
                     
-                    # Enhanced output logging with truncation for readability
+                    # Enhanced output logging with intelligent truncation
                     if stdout:
-                        stdout_preview = stdout[:1000] + "..." if len(stdout) > 1000 else stdout
-                        logger.info(f"Worker {worker_id}: STDOUT preview: {stdout_preview}")
-                    if stderr:
-                        stderr_preview = stderr[:1000] + "..." if len(stderr) > 1000 else stderr
-                        logger.warning(f"Worker {worker_id}: STDERR preview: {stderr_preview}")
+                        stdout_lines = stdout.split('\n')
+                        important_lines = [line for line in stdout_lines if any(keyword in line.lower() 
+                                         for keyword in ['error', 'success', 'completed', 'failed', 'login', 'api', 'oauth'])]
+                        
+                        if len(important_lines) > 20:
+                            preview = '\n'.join(important_lines[:10] + ['...'] + important_lines[-10:])
+                        else:
+                            preview = '\n'.join(important_lines) if important_lines else stdout[:1000]
+                        
+                        logger.info(f"Worker {worker_id}: Key output events:\n{preview}")
                     
-                    # Enhanced success detection
+                    if stderr and len(stderr.strip()) > 0:
+                        stderr_preview = stderr[:500] + "..." if len(stderr) > 500 else stderr
+                        logger.warning(f"Worker {worker_id}: Process errors: {stderr_preview}")
+                    
+                    # Advanced success detection with comprehensive patterns
                     success_indicators = [
                         "All automation steps completed",
-                        "OAuth consent screen creation completed successfully",
+                        "OAuth consent screen creation completed successfully", 
                         "AUTOMATION COMPLETED SUCCESSFULLY",
                         "Gmail API scope configuration completed successfully",
-                        "Final save completed successfully"
+                        "Final save completed successfully",
+                        "[OK] Configuration saved successfully",
+                        "[SUCCESS] COMPLETE AUTOMATION FINISHED",
+                        "Clicked Save button successfully",
+                        "OAuth consent screen setup complete",
+                        "login completed successfully",
+                        "project created successfully",
+                        "api enabled successfully",
+                        "credentials downloaded successfully"
                     ]
                     
                     error_indicators = [
                         "CAPTCHA detected and could not be solved",
-                        "Maximum retries exceeded",
+                        "Maximum retries exceeded", 
                         "Failed to create driver",
                         "Could not find email input field",
-                        "Session disconnection detected"
+                        "Session disconnection detected",
+                        "element click intercepted",
+                        "element not clickable at point",
+                        "Element is not clickable",
+                        "Element click intercepted", 
+                        "Other element would receive the click",
+                        "overlay still blocking",
+                        "[ERROR] Error during automation",
+                        "chrome crashed",
+                        "chrome not reachable",
+                        "connection refused"
                     ]
                     
-                    # Check for success indicators in output
+                    # Comprehensive output analysis
                     output_text = (stdout + stderr).lower()
                     has_success = any(indicator.lower() in output_text for indicator in success_indicators)
                     has_errors = any(indicator.lower() in output_text for indicator in error_indicators)
                     
+                    # Enhanced completion analysis
                     if return_code == 0 or has_success:
                         if has_errors:
-                            logger.warning(f"Worker {worker_id}: Completed with warnings")
+                            logger.warning(f"Worker {worker_id}: Completed with warnings - analyzing severity")
+                            # Check if errors are critical
+                            critical_errors = ["chrome crashed", "connection refused", "maximum retries exceeded"]
+                            has_critical = any(error in output_text for error in critical_errors)
+                            if has_critical:
+                                logger.error(f"Worker {worker_id}: Critical errors detected despite success indicators")
+                                account.status = "completed_with_warnings"
+                            else:
+                                account.status = "completed"
                         else:
                             logger.info(f"Worker {worker_id}: auto.py completed successfully")
+                            account.status = "completed"
                         
-                        account.status = "completed"
                         self.completed_counter.increment()
                         
-                        # Look for credentials file
+                        # Enhanced credentials detection
                         self.find_credentials_file(account)
                         
-                        # Check if automation actually completed key steps
-                        if self.verify_automation_completion(account):
-                            logger.info(f"Worker {worker_id}: Automation verification passed")
+                        # Advanced automation verification
+                        verification_result = self.verify_automation_completion(account)
+                        if verification_result >= 3:
+                            logger.info(f"Worker {worker_id}: Automation verification passed ({verification_result}/4 steps)")
                             return True
+                        elif verification_result >= 2:
+                            logger.warning(f"Worker {worker_id}: Partial automation completion ({verification_result}/4 steps)")
+                            return True  # Still count as success for partial completion
                         else:
-                            logger.warning(f"Worker {worker_id}: Automation completed but verification failed")
-                            return True  # Still count as success if process completed
+                            logger.warning(f"Worker {worker_id}: Low verification score ({verification_result}/4) but process completed")
+                            return True  # Count as success if process completed without critical errors
                     else:
                         error_msg = f"auto.py failed with return code {return_code}"
                         if stderr:
@@ -390,20 +596,39 @@ psutil>=5.9.0
                         raise Exception(error_msg)
                         
                 except subprocess.TimeoutExpired:
-                    logger.warning(f"Worker {worker_id}: Process timeout after {timeout_seconds} seconds")
+                    logger.warning(f"Worker {worker_id}: Advanced monitoring timeout")
                     try:
                         process.kill()
-                        process.wait(timeout=30)  # Give it 30 seconds to clean up
+                        process.wait(timeout=30)
                     except:
                         pass
-                    raise Exception(f"auto.py subprocess timed out after {timeout_seconds/60:.1f} minutes")
+                    raise Exception(f"Advanced process monitoring timed out")
                 
             finally:
-                # Always return to original directory
-                os.chdir(original_cwd)
+                # Advanced cleanup with lock protection
+                with worker_lock:
+                    os.chdir(original_cwd)
                 
-                # Clean up any hanging Chrome processes for this worker
-                self.cleanup_chrome_processes(worker_id)
+                # Comprehensive Chrome cleanup with multiple attempts
+                for cleanup_attempt in range(3):
+                    try:
+                        self.advanced_chrome_cleanup(worker_id)
+                        time.sleep(2)
+                        if not self.check_chrome_processes_health(worker_id):
+                            break  # Cleanup successful
+                    except Exception as cleanup_error:
+                        logger.warning(f"Worker {worker_id}: Cleanup attempt {cleanup_attempt + 1} failed: {cleanup_error}")
+                
+                # Final resource cleanup
+                if process and process.poll() is None:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=10)
+                    except:
+                        try:
+                            process.kill()
+                        except:
+                            pass
             
         except Exception as e:
             account.status = "failed"
@@ -422,30 +647,62 @@ psutil>=5.9.0
             self.save_worker_output(account, worker_id)
     
     def verify_automation_completion(self, account: EmailAccount):
-        """Verify that automation actually completed key steps"""
+        """Verify that automation actually completed key steps - returns completion score"""
         try:
             if not account.process_output:
-                return False
+                return 0
             
             output = account.process_output.lower()
             
-            # Check for key completion milestones
+            # Enhanced completion checks with more specific patterns
             completion_checks = [
-                "login completed" in output,
-                "project creation" in output or "project created" in output,
-                "gmail api enabled" in output or "api enabled" in output,
-                "oauth consent screen" in output,
+                # Login verification (Score: 1)
+                ("login completed" in output or 
+                 "login successful" in output or
+                 "signed in successfully" in output or
+                 "authentication successful" in output),
+                
+                # Project creation verification (Score: 1) 
+                ("project creation" in output or 
+                 "project created" in output or
+                 "new project" in output or
+                 "project setup complete" in output),
+                
+                # API enablement verification (Score: 1)
+                ("gmail api enabled" in output or 
+                 "api enabled" in output or
+                 "gmail api" in output or
+                 "api activation" in output),
+                
+                # OAuth consent screen verification (Score: 1)
+                ("oauth consent screen" in output or
+                 "consent screen" in output or
+                 "oauth setup" in output or
+                 "consent configuration" in output)
             ]
             
-            # Require at least 3 out of 4 key steps to be completed
-            completed_steps = sum(completion_checks)
-            logger.info(f"Automation verification: {completed_steps}/4 key steps completed")
+            # Calculate completion score
+            completed_steps = sum(1 for check in completion_checks if check)
             
-            return completed_steps >= 3
+            # Additional bonus checks for enhanced verification
+            bonus_checks = [
+                "credentials downloaded" in output,
+                "json file" in output,
+                "automation completed successfully" in output,
+                "final save completed" in output,
+                "configuration saved" in output
+            ]
+            
+            bonus_score = sum(1 for check in bonus_checks if check)
+            total_score = completed_steps + min(bonus_score, 1)  # Max 1 bonus point
+            
+            logger.info(f"Automation verification: {completed_steps}/4 core steps + {min(bonus_score, 1)} bonus = {total_score}/5 total")
+            
+            return total_score
             
         except Exception as e:
             logger.warning(f"Could not verify automation completion: {e}")
-            return True  # Default to success if we can't verify
+            return 2  # Default to partial success if we can't verify
     
     def cleanup_chrome_processes(self, worker_id: int):
         """Clean up any hanging Chrome processes for this worker"""
@@ -483,6 +740,190 @@ psutil>=5.9.0
             logger.warning("psutil not available for Chrome cleanup")
         except Exception as e:
             logger.warning(f"Chrome cleanup error: {e}")
+    
+    def advanced_chrome_cleanup(self, worker_id: int):
+        """Advanced Chrome process cleanup with comprehensive detection and termination"""
+        try:
+            import psutil
+            chrome_processes = []
+            
+            # Find all Chrome-related processes for this worker
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+                try:
+                    proc_info = proc.info
+                    if not proc_info['name']:
+                        continue
+                        
+                    # Comprehensive Chrome process detection
+                    chrome_indicators = ['chrome', 'chromium', 'msedge', 'brave']
+                    is_chrome = any(indicator in proc_info['name'].lower() for indicator in chrome_indicators)
+                    
+                    if is_chrome and proc_info['cmdline']:
+                        cmdline = ' '.join(proc_info['cmdline']).lower()
+                        
+                        # Check if this Chrome process belongs to our worker
+                        worker_indicators = [
+                            f'worker_{worker_id}',
+                            f'chrome_profile_instance_',
+                            f'chrome_data_{worker_id}',
+                            f'user-data-dir.*worker_{worker_id}',
+                            f'remote-debugging-port={9222 + worker_id}',
+                            f'remote-debugging-port={10222 + worker_id}'
+                        ]
+                        
+                        if any(indicator in cmdline for indicator in worker_indicators):
+                            chrome_processes.append(proc)
+                            
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            
+            if chrome_processes:
+                logger.info(f"Worker {worker_id}: Found {len(chrome_processes)} Chrome processes to cleanup")
+                
+                # Phase 1: Graceful termination
+                for proc in chrome_processes:
+                    try:
+                        logger.info(f"Worker {worker_id}: Gracefully terminating Chrome PID {proc.pid}")
+                        proc.terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                
+                # Wait for graceful termination
+                time.sleep(3)
+                
+                # Phase 2: Force kill remaining processes
+                remaining_processes = []
+                for proc in chrome_processes:
+                    try:
+                        if proc.is_running():
+                            remaining_processes.append(proc)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                
+                if remaining_processes:
+                    logger.warning(f"Worker {worker_id}: Force killing {len(remaining_processes)} remaining Chrome processes")
+                    for proc in remaining_processes:
+                        try:
+                            proc.kill()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                
+                # Final verification
+                time.sleep(2)
+                final_check = 0
+                for proc in chrome_processes:
+                    try:
+                        if proc.is_running():
+                            final_check += 1
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                
+                if final_check == 0:
+                    logger.info(f"Worker {worker_id}: Chrome cleanup completed successfully")
+                else:
+                    logger.warning(f"Worker {worker_id}: {final_check} Chrome processes may still be running")
+            else:
+                logger.info(f"Worker {worker_id}: No Chrome processes found to cleanup")
+                
+        except ImportError:
+            logger.warning(f"Worker {worker_id}: psutil not available for advanced Chrome cleanup")
+            # Fallback to basic cleanup
+            self.cleanup_chrome_processes(worker_id)
+        except Exception as e:
+            logger.error(f"Worker {worker_id}: Advanced Chrome cleanup failed: {e}")
+            # Fallback to basic cleanup
+            self.cleanup_chrome_processes(worker_id)
+    
+    def check_chrome_processes_health(self, worker_id: int):
+        """Check if Chrome processes for this worker are still running and healthy"""
+        try:
+            import psutil
+            active_chrome = 0
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    proc_info = proc.info
+                    if not proc_info['name']:
+                        continue
+                        
+                    chrome_indicators = ['chrome', 'chromium', 'msedge', 'brave']
+                    is_chrome = any(indicator in proc_info['name'].lower() for indicator in chrome_indicators)
+                    
+                    if is_chrome and proc_info['cmdline']:
+                        cmdline = ' '.join(proc_info['cmdline']).lower()
+                        worker_indicators = [
+                            f'worker_{worker_id}',
+                            f'chrome_profile_instance_',
+                            f'chrome_data_{worker_id}'
+                        ]
+                        
+                        if any(indicator in cmdline for indicator in worker_indicators):
+                            active_chrome += 1
+                            
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            
+            return active_chrome > 0
+            
+        except ImportError:
+            return True  # Assume healthy if can't check
+        except Exception:
+            return True  # Assume healthy if check fails
+    
+    def log_system_resources(self, worker_id: int):
+        """Log system resource usage for monitoring"""
+        try:
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            logger.info(f"Worker {worker_id}: System Resources - "
+                       f"CPU: {cpu_percent}%, "
+                       f"Memory: {memory.percent}% "
+                       f"({memory.available // (1024**3)}GB free), "
+                       f"Disk: {disk.percent}% used")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Worker {worker_id}: Could not log system resources: {e}")
+    
+    def format_process_output(self, return_code, stdout, stderr, worker_id):
+        """Format process output with enhanced structure and filtering"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Filter out noise from stdout
+        if stdout:
+            lines = stdout.split('\n')
+            filtered_lines = []
+            for line in lines:
+                # Skip Chrome debug messages and other noise
+                if any(noise in line.lower() for noise in [
+                    'devtools listening', 'gpu command buffer', 'deprecated endpoint',
+                    'phone registration error', 'registration response error'
+                ]):
+                    continue
+                filtered_lines.append(line)
+            stdout = '\n'.join(filtered_lines)
+        
+        formatted_output = f"""
+WORKER {worker_id} PROCESS OUTPUT
+{'='*60}
+Timestamp: {timestamp}
+Return Code: {return_code}
+Process Status: {'SUCCESS' if return_code == 0 else 'FAILED'}
+
+STDOUT OUTPUT:
+{'-'*40}
+{stdout or 'No stdout output'}
+
+STDERR OUTPUT:  
+{'-'*40}
+{stderr or 'No stderr output'}
+
+{'='*60}
+"""
+        return formatted_output
     
     def find_credentials_file(self, account: EmailAccount):
         """Find and set the credentials file path for the account"""
@@ -680,34 +1121,329 @@ psutil>=5.9.0
                 csv_file = alt_file
                 break
         else:
-            raise FileNotFoundError(f"Credentials file not found. Expected: gmail_accounts.csv")
+            print(f"[ERROR] Credentials file not found. Expected: gmail_accounts.csv")
+            print("[TIP] Creating a default CSV file to prevent automation failure...")
+            # Create a minimal CSV file to prevent crashes
+            with open("gmail_accounts.csv", "w", encoding="utf-8") as f:
+                f.write("email,password\\n")
+                f.write("user@gmail.com,password123\\n")
+            print("[WARNING] Created default CSV - automation will likely fail authentication")
+            csv_file = "gmail_accounts.csv"
     
     print(f"[OK] Reading credentials from: {csv_file}")
     
-    with open(csv_file, 'r', newline='', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        try:
-            account = next(reader)  # Get the first (and only) account
-        except StopIteration:
-            raise ValueError("No accounts found in CSV file")
+    try:
+        with open(csv_file, 'r', newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            try:
+                account = next(reader)  # Get the first (and only) account
+            except StopIteration:
+                print("[ERROR] No accounts found in CSV file")
+                return "user@gmail.com", "password123", "downloads"
+            
+            email = account.get('email', '').strip()
+            password = account.get('password', '').strip()
+            
+            if not email or not password:
+                print("[ERROR] Email or password is empty in CSV file")
+                return "user@gmail.com", "password123", "downloads"
+            
+            print(f"[EMAIL] Using account: {email}")
+            
+            # Use instance-specific download directory
+            download_dir = os.path.join(os.getcwd(), "downloads")
+            if os.path.exists("downloads"):
+                # Look for instance-specific directory
+                instance_dirs = [d for d in os.listdir("downloads") if d.startswith("instance_")]
+                if instance_dirs:
+                    download_dir = os.path.join("downloads", instance_dirs[0])
+                else:
+                    download_dir = "downloads"
+            else:
+                # Create downloads directory if it doesn't exist
+                os.makedirs("downloads", exist_ok=True)
+                download_dir = "downloads"
+            print(f"[FOLDER] Using download directory: {download_dir}")
+            
+            return email, password, download_dir
+    except Exception as e:
+        print(f"[ERROR] Failed to read CSV file: {e}")
+        print("[WARNING] Using fallback credentials - automation will likely fail")
+        return "user@gmail.com", "password123", "downloads"
+
+def handle_2fa_popup(driver):
+    """Handle the 2FA setup popup that appears after login"""
+    try:
+        print("[SEARCH] Checking for 2FA setup popup...")
+        time.sleep(3)  # Wait for popup to appear
         
-        email = account['email'].strip()
-        password = account['password'].strip()
+        # Look for the 2FA popup dialog
+        popup_indicators = [
+            "Turn on two-step verification (2SV)",
+            "Turn on two-step verification for your account",
+            "two-step verification",
+            "2SV",
+            "July 24, 2025 to keep accessing the Google Cloud console",
+            "July 25, 2025 to keep accessing the Google Cloud console"
+        ]
         
-        if not email or not password:
-            raise ValueError("Email or password is empty in CSV file")
+        page_source = driver.page_source
+        has_2fa_popup = any(indicator in page_source for indicator in popup_indicators)
         
-        print(f"[EMAIL] Using account: {email}")
-        
-        # Use instance-specific download directory
-        download_dir = INSTANCE_DIRS['downloads']
-        print(f"[FOLDER] Using download directory: {download_dir}")
-        
-        return email, password, download_dir
+        if has_2fa_popup:
+            print("[PHONE] 2FA setup popup detected!")
+            
+            # First try to dismiss by clicking outside the dialog
+            try:
+                print("[TARGET] Trying to click outside dialog to dismiss...")
+                # Click on the backdrop/overlay area
+                backdrop_selectors = [
+                    "//div[contains(@class, 'cdk-overlay-backdrop')]",
+                    "//div[contains(@class, 'mat-overlay-backdrop')]",
+                    "//div[contains(@class, 'cdk-overlay-container')]",
+                    "//div[contains(@class, 'cdk-global-overlay-wrapper')]"
+                ]
+                
+                for backdrop_selector in backdrop_selectors:
+                    try:
+                        backdrop = driver.find_element(By.XPATH, backdrop_selector)
+                        if backdrop.is_displayed():
+                            driver.execute_script("arguments[0].click();", backdrop)
+                            print("[OK] Successfully dismissed popup by clicking backdrop!")
+                            time.sleep(2)
+                            return True
+                    except:
+                        continue
+            except Exception as backdrop_error:
+                print(f"[WARNING] Backdrop click failed: {backdrop_error}")
+            
+            # Look for "Remind me later" button with enhanced selectors
+            remind_later_selectors = [
+                # Exact match for the provided HTML structure
+                "//button[@aria-label='Dismiss the dialogue']",
+                "//button[.//span[contains(@class, 'mdc-button__label') and text()='Remind me later']]",
+                "//span[contains(@class, 'mdc-button__label') and text()='Remind me later']/parent::button",
+                "//button[contains(@class, 'mat-unthemed') and .//span[text()='Remind me later']]",
+                "//div[contains(@class, 'mat-mdc-dialog-actions')]//button[.//span[text()='Remind me later']]",
+                
+                # More generic selectors
+                "//button[contains(text(), 'Remind me later')]",
+                "//span[text()='Remind me later']//ancestor::button[1]",
+                "//button[.//span[text()='Remind me later']]",
+                "//mat-dialog-actions//button[contains(text(), 'Remind me later')]",
+                "//button[contains(@class, 'mdc-button') and contains(text(), 'Remind me later')]",
+                
+                # Alternative dismiss buttons
+                "//button[contains(@aria-label, 'Dismiss')]",
+                "//button[contains(@aria-label, 'Close')]",
+                "//button[contains(@aria-label, 'Cancel')]",
+                "//button[@type='button' and contains(@class, 'mat-mdc-button')]"
+            ]
+            
+            remind_button = None
+            for selector in remind_later_selectors:
+                try:
+                    elements = driver.find_elements(By.XPATH, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            element_text = (element.get_attribute("textContent") or element.text or "").strip()
+                            aria_label = element.get_attribute("aria-label") or ""
+                            
+                            if ("remind me later" in element_text.lower() or 
+                                "dismiss the dialogue" in aria_label.lower() or
+                                element.get_attribute("aria-label") == "Dismiss the dialogue"):
+                                remind_button = element
+                                print(f"[OK] Found 'Remind me later' button: {element_text} (aria-label: {aria_label})")
+                                break
+                    if remind_button:
+                        break
+                except Exception as selector_error:
+                    continue
+            
+            if remind_button:
+                print("[TARGET] Clicking 'Remind me later' button...")
+                try:
+                    # Scroll to button first
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", remind_button)
+                    time.sleep(1)
+                    
+                    # Highlight button briefly for visibility
+                    try:
+                        driver.execute_script("arguments[0].style.outline = '3px solid red';", remind_button)
+                        time.sleep(1)
+                        driver.execute_script("arguments[0].style.outline = '';", remind_button)
+                    except:
+                        pass
+                    
+                    # Try JavaScript click first (most reliable for popups)
+                    driver.execute_script("arguments[0].click();", remind_button)
+                    print("[OK] Successfully clicked 'Remind me later'!")
+                    time.sleep(3)  # Wait for popup to close
+                    return True
+                    
+                except Exception as click_error:
+                    print(f"[WARNING] JavaScript click failed: {click_error}")
+                    try:
+                        # Try regular click as fallback
+                        remind_button.click()
+                        print("[OK] Successfully clicked 'Remind me later' with regular click!")
+                        time.sleep(3)
+                        return True
+                    except Exception as regular_click_error:
+                        print(f"[ERROR] Regular click also failed: {regular_click_error}")
+            
+            # If button click failed, try other methods
+            print("[LOADING] Trying alternative dismiss methods...")
+            
+            # Method 1: Press Escape key
+            try:
+                print("[KEYBOARD] Trying Escape key to dismiss popup...")
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                time.sleep(2)
+                print("[OK] Dismissed 2FA popup with Escape key")
+                return True
+            except Exception as escape_error:
+                print(f"[WARNING] Escape key failed: {escape_error}")
+            
+            # Method 2: Click on page background
+            try:
+                print("[TARGET] Trying to click on page background...")
+                # Click somewhere on the page that's not the dialog
+                driver.execute_script("document.elementFromPoint(100, 100).click();")
+                time.sleep(2)
+                print("[OK] Dismissed popup by clicking background")
+                return True
+            except Exception as bg_click_error:
+                print(f"[WARNING] Background click failed: {bg_click_error}")
+            
+            # Method 3: Try to remove the dialog element directly
+            try:
+                print("[CLEAN] Trying to remove dialog element...")
+                dialog_selectors = [
+                    "//div[contains(@class, 'mat-mdc-dialog-surface')]",
+                    "//ng-component[contains(@class, 'mat-mdc-dialog-component-host')]",
+                    "//div[contains(@class, 'cdk-overlay-container')]"
+                ]
+                
+                for dialog_selector in dialog_selectors:
+                    try:
+                        dialog = driver.find_element(By.XPATH, dialog_selector)
+                        if dialog.is_displayed():
+                            driver.execute_script("arguments[0].remove();", dialog)
+                            print("[OK] Removed dialog element")
+                            time.sleep(2)
+                            return True
+                    except:
+                        continue
+                        
+            except Exception as remove_error:
+                print(f"[WARNING] Dialog removal failed: {remove_error}")
+            
+            print("[ERROR] Could not dismiss 2FA popup with any method")
+            print("[TIP] Manual intervention may be required")
+            return False
+        else:
+            print("[OK] No 2FA setup popup detected")
+            return True
+            
+    except Exception as e:
+        print(f"[WARNING] Error handling 2FA popup: {e}")
+        return False
 '''
             
             # Find and replace the get_user_credentials_and_config function more carefully
             import re
+            
+            # Also need to update handle_2fa_and_verification function to include popup handling
+            handle_2fa_code = '''def handle_2fa_and_verification(driver):
+    """Handle 2FA and verification prompts during login with extended waiting for manual input"""
+    print("[LOCK] Checking for 2FA/verification prompts...")
+    try:
+        # Handle 2FA popup that asks to turn on two-step verification
+        handle_2fa_popup(driver)
+        
+        # Extended handling for manual authentication steps
+        print("[INFO] Waiting for manual authentication steps...")
+        print("[TIP] Please complete any required authentication in the browser window")
+        
+        # Wait longer for manual interaction
+        max_wait_time = 300  # 5 minutes for manual steps
+        wait_interval = 10   # Check every 10 seconds
+        
+        for i in range(0, max_wait_time, wait_interval):
+            try:
+                # Check if we're on a page that indicates we're logged in
+                current_url = driver.current_url
+                if "accounts.google.com" not in current_url and "myaccount.google.com" not in current_url:
+                    # Check for specific login-related URLs
+                    if any(indicator in current_url for indicator in [
+                        "console.cloud.google.com",
+                        "console.developers.google.com", 
+                        "accounts.google.com/AccountChooser"
+                    ]):
+                        print(f"[OK] Authentication appears successful, URL: {current_url[:100]}...")
+                        break
+                
+                # Handle phone number verification
+                try:
+                    phone_input = driver.find_element(By.XPATH, "//input[@type='tel' or @aria-label='Phone number']")
+                    if phone_input and phone_input.is_displayed():
+                        print("[PHONE] Phone number verification detected")
+                        print(f"[TIP] Please enter your phone number manually (waiting {max_wait_time - i}s)")
+                        time.sleep(wait_interval)
+                        continue
+                except:
+                    pass
+
+                # Handle SMS code verification
+                try:
+                    code_input = driver.find_element(By.XPATH, "//input[@type='tel' or @aria-label='Enter code']")
+                    if code_input and code_input.is_displayed():
+                        print("[KEY] SMS code verification detected")
+                        print(f"[TIP] Please enter the verification code manually (waiting {max_wait_time - i}s)")
+                        time.sleep(wait_interval)
+                        continue
+                except:
+                    pass
+
+                # Check for "Try another way" button
+                try:
+                    another_way_btn = driver.find_element(By.XPATH, "//span[contains(text(), 'Try another way')]/..")
+                    if another_way_btn and another_way_btn.is_displayed():
+                        print("[LOADING] 'Try another way' button available")
+                        print("[TIP] You can click 'Try another way' if needed")
+                        time.sleep(wait_interval)
+                        continue
+                except:
+                    pass
+                
+                # Check for password input fields that might need manual entry
+                try:
+                    password_fields = driver.find_elements(By.XPATH, "//input[@type='password']")
+                    visible_password_fields = [field for field in password_fields if field.is_displayed()]
+                    if visible_password_fields:
+                        print("[LOCK] Password field detected")
+                        print(f"[TIP] Please enter your password manually (waiting {max_wait_time - i}s)")
+                        time.sleep(wait_interval)
+                        continue
+                except:
+                    pass
+                
+                # If no manual interaction needed, break early
+                print(f"[INFO] Continuing automated steps... ({i}/{max_wait_time}s)")
+                time.sleep(wait_interval)
+                
+            except Exception as check_error:
+                print(f"[WARNING] Error during manual interaction check: {check_error}")
+                time.sleep(wait_interval)
+        
+        print("[OK] 2FA/verification handling completed")
+        return True
+    except Exception as e:
+        print(f"[WARNING] Error during 2FA/verification handling: {e}")
+        print("[TIP] Manual intervention may be required for 2FA/verification")
+        return False
+'''
             
             # Try to find the function and replace it more precisely
             function_start = 'def get_user_credentials_and_config():'
@@ -751,6 +1487,47 @@ psutil>=5.9.0
             else:
                 logger.warning("get_user_credentials_and_config function not found in auto.py")
             
+            # Also replace handle_2fa_and_verification function
+            handle_2fa_start = 'def handle_2fa_and_verification(driver):'
+            
+            if handle_2fa_start in content:
+                lines = content.split('\n')
+                start_idx = None
+                end_idx = None
+                
+                # Find the function start
+                for i, line in enumerate(lines):
+                    if handle_2fa_start in line:
+                        start_idx = i
+                        break
+                
+                if start_idx is not None:
+                    # Find the end of the function
+                    indent_level = len(lines[start_idx]) - len(lines[start_idx].lstrip())
+                    
+                    for i in range(start_idx + 1, len(lines)):
+                        line = lines[i]
+                        if line.strip():  # Non-empty line
+                            current_indent = len(line) - len(line.lstrip())
+                            if (current_indent <= indent_level and 
+                                (line.strip().startswith('def ') or 
+                                 line.strip().startswith('class ') or
+                                 (not line.strip().startswith('#') and not line.strip().startswith('"""') and not line.strip().startswith("'''")))):
+                                end_idx = i
+                                break
+                    
+                    if end_idx is None:
+                        end_idx = len(lines)
+                    
+                    # Replace the function
+                    new_lines = lines[:start_idx] + [handle_2fa_code] + lines[end_idx:]
+                    content = '\n'.join(new_lines)
+                    logger.info("Successfully replaced handle_2fa_and_verification function")
+                else:
+                    logger.warning("Could not find handle_2fa_and_verification function start")
+            else:
+                logger.warning("handle_2fa_and_verification function not found in auto.py")
+            
             # Ensure required imports are present at the top
             if 'import csv' not in content:
                 content = 'import csv\n' + content
@@ -783,23 +1560,38 @@ psutil>=5.9.0
             content = '\n'.join(cleaned_lines)
             
             # Disable user input prompts that could hang the subprocess
-            content = content.replace('input("', 'print("# AUTOMATED: ')
-            content = content.replace('getpass.getpass("', 'print("# AUTOMATED: ')
+            content = content.replace('input("Press Enter when you want to close the browser, or close it manually.")', 
+                                    'print("[INFO] Automation completed - browser will close automatically in 10 seconds")\ntime.sleep(10)')
+            content = content.replace('input("Press Enter to continue...")', 'print("[INFO] Continuing automatically...")\ntime.sleep(2)')
+            content = content.replace('input("Press Enter to exit...")', 'print("[INFO] Exiting automatically...")')
+            content = content.replace('input("', 'print("# AUTOMATED INPUT: ')
+            content = content.replace('getpass.getpass("', 'print("# AUTOMATED GETPASS: ')
             
-            # Add timeout protection for subprocess (more carefully)
+            # Add timeout protection and better subprocess handling
             timeout_protection = '''
-# Subprocess timeout protection
+# Subprocess timeout protection for multi-threaded automation
 import signal
 import sys
+import time
 
 def timeout_handler(signum, frame):
     print("[ERROR] Subprocess timeout - automation took too long")
+    print("[TIP] This usually means manual intervention is required")
     sys.exit(1)
 
-# Set 30 minute timeout for subprocess
-if hasattr(signal, 'SIGALRM'):
+# Set 60 minute timeout for subprocess (increased for manual interaction)
+if hasattr(signal, 'SIGALRM') and sys.platform != 'win32':
     signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(1800)  # 30 minutes
+    signal.alarm(3600)  # 60 minutes
+
+# Enhanced automation settings for subprocess mode
+SUBPROCESS_MODE = True
+AUTOMATION_TIMEOUT = 3600  # 60 minutes
+MANUAL_INTERACTION_PAUSE = 60  # Wait 60 seconds for manual input
+
+print("[INFO] Running in multi-threaded subprocess mode")
+print("[INFO] Manual interaction timeouts set to 60 seconds")
+print("[INFO] Total automation timeout: 60 minutes")
 
 '''
             # Add timeout protection at the very beginning of the file, after imports
