@@ -1,4 +1,4 @@
-\\print("🔄 Starting Multi-Instance Google Login Automation Script...")
+print("🔄 Starting Multi-Instance Google Login Automation Script...")
 print("⚡ ULTRA FAST: Multi-instance support with isolated Chrome profiles")
 print("📦 Loading required modules...")
 
@@ -4136,6 +4136,82 @@ def create_project_direct_approach(driver):
         print("⏳ Waiting for project creation page to load...")
         time.sleep(random.uniform(3.0, 5.0))
         
+        # Check for any remaining first-time setup modals after navigation
+        print("🔍 Checking for first-time setup modals after navigation...")
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        try:
+            # Check for modal dialogs that might appear after navigation
+            page_source = driver.page_source.lower()
+            modal_present = False
+            
+            modal_indicators = [
+                ".mat-mdc-dialog-container",
+                "[role='dialog']",
+                ".cdk-overlay-container .mat-mdc-dialog-surface"
+            ]
+            
+            for selector in modal_indicators:
+                try:
+                    modals = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for modal in modals:
+                        if modal.is_displayed():
+                            modal_text = modal.text.lower()
+                            # Check for setup-related content
+                            if any(keyword in modal_text for keyword in [
+                                "welcome", "country", "terms", "get started", 
+                                "setup", "first time", "agree", "accept"
+                            ]):
+                                print(f"🎯 Setup modal detected after navigation: {modal_text[:100]}...")
+                                modal_present = True
+                                
+                                # Try to handle this modal
+                                action_buttons = [
+                                    "//button[contains(.//span, 'Continue')]",
+                                    "//button[contains(.//span, 'Accept')]", 
+                                    "//button[contains(.//span, 'Get started')]",
+                                    "//button[contains(.//span, 'I accept')]",
+                                    "//button[contains(text(), 'Continue')]",
+                                    "//button[contains(text(), 'Accept')]"
+                                ]
+                                
+                                button_found = False
+                                for button_selector in action_buttons:
+                                    try:
+                                        buttons = modal.find_elements(By.XPATH, button_selector)
+                                        for button in buttons:
+                                            if button.is_displayed() and button.is_enabled():
+                                                print(f"🎯 Clicking modal button: {button.text}")
+                                                driver.execute_script("arguments[0].click();", button)
+                                                time.sleep(random.uniform(2.0, 3.0))
+                                                button_found = True
+                                                break
+                                        if button_found:
+                                            break
+                                    except:
+                                        continue
+                                
+                                if button_found:
+                                    print("✅ Setup modal handled after navigation!")
+                                else:
+                                    print("⚠️ Could not find suitable button, dismissing with Escape...")
+                                    try:
+                                        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                                        time.sleep(random.uniform(1.0, 2.0))
+                                    except:
+                                        pass
+                                break
+                    if modal_present:
+                        break
+                except:
+                    continue
+            
+            if not modal_present:
+                print("✅ No setup modals detected after navigation")
+                
+        except Exception as modal_check_error:
+            print(f"⚠️ Error checking for setup modals: {modal_check_error}")
+        
         # Check for CAPTCHA or verification
         if not wait_for_page_load_and_check_captcha(driver):
             print("⚠️ CAPTCHA or verification detected during navigation")
@@ -5897,7 +5973,236 @@ try:
         input("🔐 Press Enter after completing 2FA...")
         return True
     
-    # Check for Google Play Console Terms of Service (first-time login)
+    # Check for Google Cloud Console first-time setup (country selection + terms)
+    print("🔍 Checking for Google Cloud Console first-time setup modal...")
+    time.sleep(random.uniform(2.0, 4.0))  # Wait for any modals to appear
+    
+    # Check for the country selection and terms modal that appears for new accounts
+    try:
+        # Look for modal dialog indicators
+        modal_selectors = [
+            ".mat-mdc-dialog-content",
+            "[role='dialog']",
+            ".cdk-overlay-container",
+            ".mat-dialog-container",
+            "mat-dialog-container"
+        ]
+        
+        cloud_console_modal_found = False
+        modal_element = None
+        
+        for selector in modal_selectors:
+            try:
+                modal_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                for element in modal_elements:
+                    if element.is_displayed():
+                        modal_text = element.text.lower()
+                        # Check for Google Cloud Console specific indicators
+                        cloud_indicators = [
+                            "welcome" in modal_text and "google cloud" in modal_text,
+                            "country" in modal_text and "create and manage" in modal_text,
+                            "terms of service" in modal_text and "google cloud" in modal_text,
+                            "select your country" in modal_text,
+                            "google cloud console" in modal_text,
+                            "create and manage projects" in modal_text
+                        ]
+                        
+                        if any(cloud_indicators):
+                            print("🎯 Google Cloud Console first-time setup modal detected!")
+                            print(f"📝 Modal content preview: {modal_text[:200]}...")
+                            cloud_console_modal_found = True
+                            modal_element = element
+                            break
+                
+                if cloud_console_modal_found:
+                    break
+                    
+            except Exception as selector_error:
+                continue
+        
+        if cloud_console_modal_found:
+            print("🏁 Handling Google Cloud Console first-time setup...")
+            
+            # Handle country selection dropdown in the modal
+            print("🌍 Looking for country selection dropdown in modal...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            # Country dropdown selectors for Google Cloud Console modal
+            country_dropdown_selectors = [
+                ".mat-mdc-select-trigger",
+                ".mat-select-trigger", 
+                "[role='combobox']",
+                "mat-select[formcontrolname='country']",
+                ".mat-mdc-form-field-type-mat-select",
+                "cfc-select",
+                ".cfc-select"
+            ]
+            
+            country_dropdown = None
+            for selector in country_dropdown_selectors:
+                try:
+                    dropdowns = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for dropdown in dropdowns:
+                        if dropdown.is_displayed():
+                            country_dropdown = dropdown
+                            print(f"✅ Found country dropdown with selector: {selector}")
+                            break
+                    if country_dropdown:
+                        break
+                except Exception:
+                    continue
+            
+            if country_dropdown:
+                # Click to open the dropdown
+                print("🖱️ Clicking country dropdown...")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", country_dropdown)
+                time.sleep(random.uniform(0.5, 1.0))
+                human_mouse_move_to(country_dropdown)
+                country_dropdown.click()
+                time.sleep(random.uniform(1.0, 2.0))
+                
+                # Look for Austria in the dropdown options
+                print("🔍 Looking for Austria in country options...")
+                austria_selectors = [
+                    "//mat-option[contains(.//span, 'Austria')]",
+                    "//mat-option[contains(text(), 'Austria')]",
+                    "//div[contains(@class, 'mat-option') and contains(text(), 'Austria')]",
+                    "//span[contains(text(), 'Austria')]//parent::mat-option",
+                    "//*[contains(text(), 'Austria') and contains(@class, 'mat-option')]",
+                    "//cfc-option[contains(text(), 'Austria')]"
+                ]
+                
+                austria_option = None
+                for selector in austria_selectors:
+                    try:
+                        austria_option = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
+                        print(f"✅ Found Austria option with selector: {selector}")
+                        break
+                    except TimeoutException:
+                        continue
+                
+                if austria_option:
+                    print("🇦🇹 Selecting Austria...")
+                    driver.execute_script("arguments[0].click();", austria_option)
+                    time.sleep(random.uniform(0.5, 1.0))
+                    print("✅ Austria selected successfully!")
+                else:
+                    print("⚠️ Could not find Austria option, using default selection...")
+            else:
+                print("⚠️ Could not find country dropdown in modal")
+            
+            # Look for and check the Terms of Service agreement checkbox
+            print("☑️ Looking for Terms of Service agreement checkbox...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            checkbox_selectors = [
+                "input[type='checkbox']",
+                ".mat-mdc-checkbox-input", 
+                ".mdc-checkbox__native-control",
+                "mat-checkbox input",
+                "#mat-mdc-checkbox-1-input",
+                "input[id*='checkbox']"
+            ]
+            
+            agreement_checkbox = None
+            for selector in checkbox_selectors:
+                try:
+                    checkboxes = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for checkbox in checkboxes:
+                        if checkbox.is_displayed() and checkbox.is_enabled():
+                            # Check if this checkbox is related to terms/agreement
+                            parent_text = ""
+                            try:
+                                parent = checkbox.find_element(By.XPATH, "../..")
+                                parent_text = parent.text.lower()
+                            except:
+                                pass
+                            
+                            if any(term in parent_text for term in ["agree", "terms", "accept", "consent"]):
+                                agreement_checkbox = checkbox
+                                print(f"✅ Found agreement checkbox with selector: {selector}")
+                                break
+                    if agreement_checkbox:
+                        break
+                except Exception:
+                    continue
+            
+            if agreement_checkbox:
+                # Check if checkbox is already checked
+                is_checked = agreement_checkbox.is_selected()
+                if not is_checked:
+                    print("☑️ Checking Terms of Service agreement...")
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", agreement_checkbox)
+                    time.sleep(random.uniform(0.5, 1.0))
+                    human_mouse_move_to(agreement_checkbox)
+                    agreement_checkbox.click()
+                    time.sleep(random.uniform(0.5, 1.0))
+                    print("✅ Terms of Service agreement checked!")
+                else:
+                    print("✅ Terms of Service agreement already checked!")
+            else:
+                print("⚠️ Could not find Terms of Service agreement checkbox")
+            
+            # Look for and click the Continue/Accept button in the modal
+            print("➡️ Looking for Continue/Accept button in modal...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            continue_selectors = [
+                "//button[contains(.//span, 'Continue')]",
+                "//button[contains(.//span, 'Accept')]", 
+                "//button[contains(.//span, 'Agree')]",
+                "//button[contains(.//span, 'Get started')]",
+                "//span[contains(text(), 'Continue')]//parent::button",
+                "//span[contains(text(), 'Accept')]//parent::button",
+                ".mat-primary button",
+                "button[type='submit']",
+                ".mdc-button--unelevated"
+            ]
+            
+            continue_button = None
+            for selector in continue_selectors:
+                try:
+                    if selector.startswith("//"):
+                        buttons = driver.find_elements(By.XPATH, selector)
+                    else:
+                        buttons = driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for button in buttons:
+                        if button.is_displayed() and button.is_enabled():
+                            continue_button = button
+                            print(f"✅ Found continue button with selector: {selector}")
+                            break
+                    if continue_button:
+                        break
+                except Exception:
+                    continue
+            
+            if continue_button:
+                print("✅ Clicking Continue/Accept button...")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", continue_button)
+                time.sleep(random.uniform(0.5, 1.0))
+                human_mouse_move_to(continue_button)
+                continue_button.click()
+                time.sleep(random.uniform(2.0, 4.0))  # Wait for modal to close and page to load
+                print("✅ Google Cloud Console first-time setup completed!")
+            else:
+                print("⚠️ Could not find Continue/Accept button, trying to close modal...")
+                # Try pressing Escape to close modal
+                try:
+                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                    time.sleep(random.uniform(1.0, 2.0))
+                    print("✅ Closed modal with Escape key")
+                except:
+                    print("⚠️ Could not close modal")
+                    
+        else:
+            print("✅ No Google Cloud Console first-time setup modal detected")
+            
+    except Exception as cloud_setup_error:
+        print(f"⚠️ Error handling Google Cloud Console first-time setup: {cloud_setup_error}")
+        print("💡 Continuing with automation...")
+
+    # Additional check for Google Play Console Terms of Service (legacy/alternative flow)
     print("🔍 Checking for Google Play Console Terms of Service...")
     current_url = driver.current_url
     if "play.google.com" in current_url or "terms" in current_url.lower():
@@ -6619,6 +6924,128 @@ try:
     except Exception as country_modal_error:
         print(f"⚠️ Error handling welcome modal: {country_modal_error}")
         print("💡 You may need to manually complete the country selection if prompted")
+
+    # Final check for Google Cloud Console first-time setup before project creation
+    print("🔍 Final check for any first-time setup requirements...")
+    time.sleep(random.uniform(2.0, 3.0))
+    
+    try:
+        # Check current URL and page content for first-time setup indicators
+        current_url = driver.current_url.lower()
+        page_source = driver.page_source.lower()
+        
+        # Look for first-time setup indicators
+        first_time_indicators = [
+            "welcome to google cloud" in page_source,
+            "get started with google cloud" in page_source,
+            "country" in page_source and "terms" in page_source,
+            "first time" in page_source,
+            "setup" in page_source and "google cloud" in page_source,
+            "mat-mdc-dialog" in page_source and "country" in page_source
+        ]
+        
+        if any(first_time_indicators):
+            print("🎯 First-time setup requirements detected!")
+            
+            # Handle any remaining modal dialogs
+            modal_handled = False
+            max_modal_attempts = 3
+            
+            for attempt in range(max_modal_attempts):
+                print(f"🔍 Modal check attempt {attempt + 1}/{max_modal_attempts}...")
+                
+                try:
+                    # Look for visible modal dialogs
+                    modal_selectors = [
+                        ".mat-mdc-dialog-container",
+                        ".cdk-overlay-container .mat-mdc-dialog-surface", 
+                        "[role='dialog']",
+                        ".mat-dialog-container"
+                    ]
+                    
+                    active_modal = None
+                    for selector in modal_selectors:
+                        try:
+                            modals = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for modal in modals:
+                                if modal.is_displayed():
+                                    modal_text = modal.text.lower()
+                                    if any(keyword in modal_text for keyword in ["country", "terms", "welcome", "setup", "get started"]):
+                                        active_modal = modal
+                                        print(f"✅ Found active setup modal with selector: {selector}")
+                                        break
+                            if active_modal:
+                                break
+                        except:
+                            continue
+                    
+                    if active_modal:
+                        print("🔧 Handling active setup modal...")
+                        
+                        # Look for accept/continue button
+                        button_selectors = [
+                            "//button[contains(.//span, 'Continue')]",
+                            "//button[contains(.//span, 'Accept')]",
+                            "//button[contains(.//span, 'Get started')]", 
+                            "//button[contains(.//span, 'I accept')]",
+                            "//button[contains(.//span, 'Agree')]",
+                            ".mat-mdc-button.mat-primary",
+                            "button[type='submit']"
+                        ]
+                        
+                        button_clicked = False
+                        for button_selector in button_selectors:
+                            try:
+                                if button_selector.startswith("//"):
+                                    buttons = active_modal.find_elements(By.XPATH, button_selector)
+                                else:
+                                    buttons = active_modal.find_elements(By.CSS_SELECTOR, button_selector)
+                                
+                                for button in buttons:
+                                    if button.is_displayed() and button.is_enabled():
+                                        print(f"🎯 Clicking setup button: {button.text}")
+                                        driver.execute_script("arguments[0].click();", button)
+                                        time.sleep(random.uniform(2.0, 3.0))
+                                        button_clicked = True
+                                        modal_handled = True
+                                        break
+                                if button_clicked:
+                                    break
+                            except:
+                                continue
+                        
+                        if button_clicked:
+                            print("✅ Setup modal handled successfully!")
+                            break
+                        else:
+                            print("⚠️ Could not find suitable button in modal, trying escape...")
+                            try:
+                                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                                time.sleep(random.uniform(1.0, 2.0))
+                                modal_handled = True
+                                break
+                            except:
+                                pass
+                    else:
+                        print("✅ No active setup modal found")
+                        modal_handled = True
+                        break
+                        
+                except Exception as modal_error:
+                    print(f"⚠️ Error checking for modal in attempt {attempt + 1}: {modal_error}")
+                    if attempt == max_modal_attempts - 1:
+                        print("⚠️ Max modal attempts reached, continuing anyway...")
+                        modal_handled = True
+            
+            if not modal_handled:
+                print("⚠️ Could not handle all setup modals automatically")
+                print("💡 You may need to complete setup manually if prompted")
+        else:
+            print("✅ No first-time setup requirements detected")
+            
+    except Exception as setup_check_error:
+        print(f"⚠️ Error during final setup check: {setup_check_error}")
+        print("💡 Continuing with project creation...")
 
     # Step 5: Create new project using direct approach
     print("🆕 Creating new project...")
