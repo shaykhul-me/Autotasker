@@ -16,6 +16,7 @@ import shutil
 import uuid
 import glob
 import json
+import re
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
@@ -88,6 +89,11 @@ class SubprocessMultiThreadedAutomation:
         self.completed_counter = ThreadSafeCounter()
         self.failed_counter = ThreadSafeCounter()
         self.base_dir = os.getcwd()
+        
+        # Create centralized credentials collection folder
+        self.final_credentials_dir = os.path.join(self.base_dir, "final_credentials_collection")
+        os.makedirs(self.final_credentials_dir, exist_ok=True)
+        logger.info(f"Created final credentials collection directory: {self.final_credentials_dir}")
     
     def load_accounts_from_csv(self, csv_file="gmail_accounts.csv"):
         """Load email accounts from CSV file"""
@@ -146,7 +152,7 @@ class SubprocessMultiThreadedAutomation:
             
             # Create Unicode-safe version of auto.py
             logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating Unicode-safe auto.py")
-            if not self.create_unicode_safe_auto_py(account.worker_dir):
+            if not self.create_unicode_safe_auto_py(account.worker_dir, worker_id):
                 logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Could not create Unicode-safe auto.py")
                 return False
             logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Unicode-safe auto.py created")
@@ -270,20 +276,23 @@ class SubprocessMultiThreadedAutomation:
                 except Exception as dir_error:
                     logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create directory {dir_name}: {dir_error}")
             
-            # Create a worker-specific configuration file
-            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating worker configuration file")
+            # Create a worker-specific configuration file with unique Chrome debugging port
+            chrome_debug_port = 9222 + worker_id  # Ensure unique ports (9223, 9224, 9225, etc.)
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating worker configuration file with Chrome debug port {chrome_debug_port}")
             config_content = f'''# Worker {worker_id} Configuration
 EMAIL = "{account.email}"
 WORKER_ID = {worker_id}
 WORKER_DIR = "{account.worker_dir}"
 DOWNLOADS_DIR = "{os.path.join(account.worker_dir, 'downloads')}"
 CHROME_PROFILE_DIR = "{os.path.join(account.worker_dir, f'chrome_profile_instance_{uuid.uuid4().hex[:8]}')}"
+CHROME_DEBUG_PORT = {chrome_debug_port}
 AUTOMATION_MODE = "MULTI_THREADED"
 FAST_MODE = True
 RETRY_ATTEMPTS = 3
 HANDLE_OVERLAYS = True
 SAFE_CLICK_ENABLED = True
 DEBUG_MODE = True
+ISOLATED_WORKER = True
 '''
             
             config_path = os.path.join(account.worker_dir, "worker_config.py")
@@ -680,6 +689,18 @@ psutil>=5.9.0
                             logger.info(f"[DETAIL] Worker {worker_id}: Credentials found at: {account.credentials_path}")
                         else:
                             logger.warning(f"[DETAIL] Worker {worker_id}: No credentials file found")
+                        
+                        # INSTANT CREDENTIAL COLLECTION - Collect immediately when worker completes
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Starting instant credential collection")
+                        try:
+                            collected_count = self.collect_worker_credentials_instantly(account, worker_id)
+                            if collected_count > 0:
+                                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Instantly collected {collected_count} credential files")
+                            else:
+                                logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task WARNING - No credential files found for instant collection")
+                        except Exception as collection_error:
+                            logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Instant credential collection error: {collection_error}")
+                        
                         if has_errors:
                             logger.warning(f"Worker {worker_id}: Completed with warnings - analyzing severity")
                             # Check if errors are critical
@@ -1072,6 +1093,339 @@ STDERR OUTPUT:
 """
         return formatted_output
     
+    def collect_all_credentials(self):
+        """Collect all downloaded credential files from workers into final collection folder"""
+        try:
+            logger.info("[CREDENTIALS] Starting centralized credential collection...")
+            collected_files = []
+            
+            # Search through all worker directories for credential files
+            for account in self.accounts:
+                worker_id = list(self.accounts).index(account) + 1
+                logger.info(f"[CREDENTIALS] Collecting credentials from Worker {worker_id} ({account.email})")
+                
+                # Search patterns for credential files in worker directory
+                search_patterns = [
+                    os.path.join(account.worker_dir, "*.json"),
+                    os.path.join(account.worker_dir, "downloads", "*.json"),
+                    os.path.join(account.worker_dir, "credentials", "*.json"),
+                    os.path.join(account.worker_dir, "temp", "*.json"),
+                    os.path.join(account.worker_dir, "**", "*client_secret*.json"),
+                    os.path.join(account.worker_dir, "**", "*credentials*.json"),
+                ]
+                
+                worker_credentials = []
+                found_files = set()  # Track already found files to avoid duplicates
+                
+                for pattern in search_patterns:
+                    try:
+                        files = glob.glob(pattern, recursive=True)
+                        for file_path in files:
+                            # Normalize path and avoid duplicates
+                            normalized_path = os.path.normpath(file_path)
+                            if normalized_path not in found_files and self.is_credential_file(file_path):
+                                worker_credentials.append(file_path)
+                                found_files.add(normalized_path)
+                                logger.info(f"[CREDENTIALS] Found credential file: {os.path.basename(file_path)}")
+                    except Exception as e:
+                        logger.warning(f"[CREDENTIALS] Error searching pattern {pattern}: {e}")
+                
+                # Copy worker credentials to final collection folder
+                if worker_credentials:
+                    for cred_file in worker_credentials:
+                        try:
+                            # Create meaningful filename with worker info
+                            original_name = os.path.basename(cred_file)
+                            base_name, ext = os.path.splitext(original_name)
+                            
+                            # Generate unique filename with account email
+                            safe_email = account.email.replace('@', '_at_').replace('.', '_')
+                            new_filename = f"worker_{worker_id}_{safe_email}_{base_name}{ext}"
+                            
+                            destination = os.path.join(self.final_credentials_dir, new_filename)
+                            
+                            # Copy the file
+                            shutil.copy2(cred_file, destination)
+                            collected_files.append({
+                                'worker_id': worker_id,
+                                'email': account.email,
+                                'original_path': cred_file,
+                                'final_path': destination,
+                                'filename': new_filename
+                            })
+                            
+                            logger.info(f"[CREDENTIALS] ✅ Copied {original_name} -> {new_filename}")
+                            print(f"[CREDENTIALS] ✅ Worker {worker_id}: {account.email} -> {new_filename}")
+                            
+                        except Exception as copy_error:
+                            logger.error(f"[CREDENTIALS] Failed to copy {cred_file}: {copy_error}")
+                else:
+                    logger.warning(f"[CREDENTIALS] No credentials found for Worker {worker_id} ({account.email})")
+                    print(f"[CREDENTIALS] ❌ Worker {worker_id}: No credentials found for {account.email}")
+            
+            # Create summary report
+            self.create_credentials_summary_report(collected_files)
+            
+            if collected_files:
+                print(f"\n🎉 CREDENTIAL COLLECTION COMPLETE!")
+                print(f"📁 Collection Directory: {self.final_credentials_dir}")
+                print(f"📄 Total Files Collected: {len(collected_files)}")
+                print("\nCollected Files:")
+                for i, file_info in enumerate(collected_files, 1):
+                    print(f"  {i}. {file_info['filename']} (Worker {file_info['worker_id']}: {file_info['email']})")
+            else:
+                print(f"\n⚠️ No credential files were collected from any worker.")
+                print(f"Check individual worker directories for manual collection:")
+                for account in self.accounts:
+                    worker_id = list(self.accounts).index(account) + 1
+                    print(f"  Worker {worker_id}: {account.worker_dir}")
+            
+            return collected_files
+            
+        except Exception as e:
+            logger.error(f"[CREDENTIALS] Error during credential collection: {e}")
+            print(f"❌ Error collecting credentials: {e}")
+            return []
+    
+    def collect_worker_credentials_instantly(self, account: EmailAccount, worker_id: int):
+        """Instantly collect credential files from a single worker when it completes"""
+        try:
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Starting instant credential collection for {account.email}")
+            collected_count = 0
+            
+            # Search patterns for credential files in this worker directory
+            search_patterns = [
+                os.path.join(account.worker_dir, "*.json"),
+                os.path.join(account.worker_dir, "downloads", "*.json"),
+                os.path.join(account.worker_dir, "credentials", "*.json"),
+                os.path.join(account.worker_dir, "temp", "*.json"),
+                os.path.join(account.worker_dir, "**", "*client_secret*.json"),
+                os.path.join(account.worker_dir, "**", "*credentials*.json"),
+            ]
+            
+            worker_credentials = []
+            found_files = set()  # Track already found files to avoid duplicates
+            
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Searching {len(search_patterns)} patterns for credentials")
+            for pattern in search_patterns:
+                try:
+                    files = glob.glob(pattern, recursive=True)
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Pattern '{pattern}' found {len(files)} files")
+                    for file_path in files:
+                        # Normalize path and avoid duplicates
+                        normalized_path = os.path.normpath(file_path)
+                        if normalized_path not in found_files and self.is_credential_file(file_path):
+                            worker_credentials.append(file_path)
+                            found_files.add(normalized_path)
+                            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Found credential file: {os.path.basename(file_path)}")
+                except Exception as e:
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task - Error searching pattern {pattern}: {e}")
+            
+            # Instantly copy worker credentials to final collection folder
+            if worker_credentials:
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Copying {len(worker_credentials)} credential files")
+                for cred_file in worker_credentials:
+                    try:
+                        # Create meaningful filename with worker info
+                        original_name = os.path.basename(cred_file)
+                        base_name, ext = os.path.splitext(original_name)
+                        
+                        # Generate unique filename with account email and timestamp
+                        safe_email = account.email.replace('@', '_at_').replace('.', '_')
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        new_filename = f"worker_{worker_id}_{safe_email}_{base_name}_{timestamp}{ext}"
+                        
+                        destination = os.path.join(self.final_credentials_dir, new_filename)
+                        
+                        # Copy the file instantly
+                        shutil.copy2(cred_file, destination)
+                        collected_count += 1
+                        
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Copied {original_name} -> {new_filename}")
+                        print(f"🎉 [INSTANT COLLECTION] Worker {worker_id}: {account.email} -> {new_filename}")
+                        
+                    except Exception as copy_error:
+                        logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Copy {cred_file}: {copy_error}")
+                
+                # Create instant summary for this worker
+                summary_file = os.path.join(self.final_credentials_dir, f"worker_{worker_id}_summary.txt")
+                try:
+                    with open(summary_file, 'w', encoding='utf-8') as f:
+                        f.write(f"INSTANT CREDENTIAL COLLECTION SUMMARY\n")
+                        f.write(f"Worker {worker_id}: {account.email}\n")
+                        f.write(f"Collection Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        f.write(f"Files Collected: {collected_count}\n\n")
+                        
+                        for i, cred_file in enumerate(worker_credentials, 1):
+                            original_name = os.path.basename(cred_file)
+                            f.write(f"{i}. {original_name}\n")
+                            f.write(f"   Source: {cred_file}\n")
+                            f.write(f"   Size: {os.path.getsize(cred_file)} bytes\n\n")
+                    
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created instant summary: {summary_file}")
+                    
+                except Exception as summary_error:
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task WARNING - Could not create summary: {summary_error}")
+                
+                print(f"📁 [INSTANT COLLECTION] Worker {worker_id} collected {collected_count} files to: {self.final_credentials_dir}")
+                
+            else:
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task INFO - No credential files found for instant collection")
+                print(f"⚠️ [INSTANT COLLECTION] Worker {worker_id}: No credentials found for {account.email}")
+            
+            return collected_count
+            
+        except Exception as e:
+            logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Instant credential collection error: {e}")
+            print(f"❌ [INSTANT COLLECTION] Worker {worker_id} Error: {e}")
+            return 0
+    
+    def get_instant_collection_summary(self):
+        """Get summary of files collected instantly from all workers"""
+        try:
+            summary_files = []
+            total_collected = 0
+            
+            # Look for collected files in the final credentials directory
+            if os.path.exists(self.final_credentials_dir):
+                # Find all credential files (exclude summary files)
+                credential_files = [f for f in os.listdir(self.final_credentials_dir) 
+                                  if f.endswith('.json') and not f.endswith('_summary.txt')]
+                
+                total_collected = len(credential_files)
+                
+                # Parse information from filenames
+                for filename in credential_files:
+                    try:
+                        # Extract worker info from filename pattern: worker_X_email_at_domain_...
+                        parts = filename.split('_')
+                        if len(parts) >= 4 and parts[0] == 'worker':
+                            worker_id = parts[1]
+                            # Reconstruct email from parts (handle _at_ replacement)
+                            email_parts = []
+                            for i, part in enumerate(parts[2:]):
+                                if part == 'at':
+                                    email_parts.append('@')
+                                elif parts[2:][i-1] == 'at' if i > 0 else False:
+                                    email_parts.append(part.replace('_', '.'))
+                                else:
+                                    email_parts.append(part)
+                                if len(email_parts) >= 2 and '@' in email_parts:
+                                    break
+                            
+                            email = ''.join(email_parts[:3]) if len(email_parts) >= 3 else 'unknown'
+                            
+                            summary_files.append({
+                                'worker_id': worker_id,
+                                'email': email,
+                                'filename': filename,
+                                'filepath': os.path.join(self.final_credentials_dir, filename),
+                                'size': os.path.getsize(os.path.join(self.final_credentials_dir, filename))
+                            })
+                    except Exception as parse_error:
+                        logger.warning(f"Could not parse filename {filename}: {parse_error}")
+                        summary_files.append({
+                            'worker_id': 'unknown',
+                            'email': 'unknown',
+                            'filename': filename,
+                            'filepath': os.path.join(self.final_credentials_dir, filename),
+                            'size': os.path.getsize(os.path.join(self.final_credentials_dir, filename))
+                        })
+            
+            print(f"📊 Instant Collection Results:")
+            print(f"   📁 Collection Directory: {self.final_credentials_dir}")
+            print(f"   📄 Total Files Collected: {total_collected}")
+            
+            if summary_files:
+                print("\n📋 Collected Files:")
+                for i, file_info in enumerate(summary_files, 1):
+                    size_kb = file_info['size'] / 1024
+                    print(f"   {i}. Worker {file_info['worker_id']}: {file_info['email']}")
+                    print(f"      📄 {file_info['filename']} ({size_kb:.1f} KB)")
+            else:
+                print("   ⚠️ No credential files found in collection directory")
+            
+            return summary_files
+            
+        except Exception as e:
+            logger.error(f"Error getting instant collection summary: {e}")
+            print(f"❌ Error getting collection summary: {e}")
+            return []
+    
+    def is_credential_file(self, file_path):
+        """Check if a JSON file is a Google credential file"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read(1000)  # Read first 1000 chars
+                # Check for Google credential indicators
+                indicators = [
+                    'client_id', 'client_secret', 'auth_uri', 'token_uri', 
+                    'googleapis.com', 'oauth2', 'auth_provider_x509_cert_url'
+                ]
+                return any(indicator in content.lower() for indicator in indicators)
+        except Exception:
+            return False
+    
+    def create_credentials_summary_report(self, collected_files):
+        """Create a detailed summary report of all collected credentials"""
+        try:
+            report_file = os.path.join(self.final_credentials_dir, "credentials_collection_report.txt")
+            
+            with open(report_file, 'w', encoding='utf-8') as f:
+                f.write("GMAIL API CREDENTIALS COLLECTION REPORT\n")
+                f.write("=" * 50 + "\n\n")
+                f.write(f"Collection Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Total Workers: {len(self.accounts)}\n")
+                f.write(f"Successful Collections: {len(collected_files)}\n")
+                f.write(f"Collection Directory: {self.final_credentials_dir}\n\n")
+                
+                if collected_files:
+                    f.write("COLLECTED CREDENTIAL FILES:\n")
+                    f.write("-" * 30 + "\n")
+                    for i, file_info in enumerate(collected_files, 1):
+                        f.write(f"{i}. {file_info['filename']}\n")
+                        f.write(f"   Worker: {file_info['worker_id']}\n")
+                        f.write(f"   Email: {file_info['email']}\n")
+                        f.write(f"   Original: {file_info['original_path']}\n")
+                        f.write(f"   Final Location: {file_info['final_path']}\n")
+                        
+                        # Add file details
+                        try:
+                            file_size = os.path.getsize(file_info['final_path'])
+                            file_time = datetime.fromtimestamp(os.path.getctime(file_info['final_path']))
+                            f.write(f"   Size: {file_size} bytes\n")
+                            f.write(f"   Created: {file_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        except:
+                            pass
+                        f.write("\n")
+                else:
+                    f.write("No credential files were collected.\n\n")
+                
+                f.write("WORKER SUMMARY:\n")
+                f.write("-" * 15 + "\n")
+                for account in self.accounts:
+                    worker_id = list(self.accounts).index(account) + 1
+                    worker_files = [f for f in collected_files if f['worker_id'] == worker_id]
+                    status = "✅ SUCCESS" if worker_files else "❌ NO CREDENTIALS"
+                    f.write(f"Worker {worker_id}: {account.email} - {status}\n")
+                    if worker_files:
+                        f.write(f"   Files: {', '.join([f['filename'] for f in worker_files])}\n")
+                    f.write(f"   Directory: {account.worker_dir}\n\n")
+                
+                f.write("\nUSAGE INSTRUCTIONS:\n")
+                f.write("-" * 19 + "\n")
+                f.write("1. Each credential file is ready to use for Gmail API access\n")
+                f.write("2. Rename files to 'credentials.json' when using in projects\n")
+                f.write("3. Keep files secure and do not share publicly\n")
+                f.write("4. Each file corresponds to one Gmail account's API access\n")
+                f.write("5. Use the email in the filename to identify which account it belongs to\n")
+            
+            logger.info(f"[CREDENTIALS] Created collection report: {report_file}")
+            print(f"📋 Collection report created: credentials_collection_report.txt")
+            
+        except Exception as e:
+            logger.error(f"[CREDENTIALS] Failed to create summary report: {e}")
+    
     def find_credentials_file(self, account: EmailAccount):
         """Find and set the credentials file path for the account"""
         try:
@@ -1192,6 +1546,40 @@ STDERR OUTPUT:
             logger.error(f"[DETAIL] Exception type: {type(e).__name__}")
             print(f"\n⚠️ Error searching for credentials for {account.email}: {e}")
     
+    def monitor_workers_health(self, future_to_account):
+        """Monitor health of all workers and their Chrome processes"""
+        try:
+            logger.info("[WORKER-TASK] Health monitoring started")
+            monitor_interval = 30  # Check every 30 seconds
+            
+            while any(not future.done() for future in future_to_account.keys()):
+                time.sleep(monitor_interval)
+                
+                active_workers = 0
+                for future, account in future_to_account.items():
+                    if not future.done():
+                        active_workers += 1
+                        worker_id = list(self.accounts).index(account) + 1
+                        
+                        # Check Chrome process health for this worker
+                        chrome_health = self.check_chrome_processes_health(worker_id)
+                        if chrome_health:
+                            logger.info(f"[WORKER-TASK] Worker {worker_id} ({account.email}): Chrome processes healthy")
+                        else:
+                            logger.warning(f"[WORKER-TASK] Worker {worker_id} ({account.email}): Chrome process issues detected")
+                        
+                        # Log system resources every few cycles
+                        self.log_system_resources(worker_id)
+                
+                if active_workers > 0:
+                    logger.info(f"[WORKER-TASK] Health check: {active_workers} workers still active")
+                else:
+                    logger.info("[WORKER-TASK] All workers completed, ending health monitoring")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"[WORKER-TASK] Health monitoring error: {e}")
+    
     def run_automation(self):
         """Run automation for all accounts using thread pool"""
         if not self.accounts:
@@ -1206,15 +1594,28 @@ STDERR OUTPUT:
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Submit all tasks
-                future_to_account = {
-                    executor.submit(self.run_single_account_subprocess, account, worker_id): account
-                    for worker_id, account in enumerate(self.accounts, 1)
-                }
+                # Submit all tasks with improved Chrome process isolation
+                future_to_account = {}
+                for worker_id, account in enumerate(self.accounts, 1):
+                    logger.info(f"[WORKER-TASK] Preparing worker {worker_id} for account {account.email}")
+                    # Ensure Chrome process cleanup before starting new worker
+                    self.cleanup_chrome_processes(worker_id)
+                    future = executor.submit(self.run_single_account_subprocess, account, worker_id)
+                    future_to_account[future] = account
                 
-                # Monitor progress with detailed worker task actions
+                # Monitor progress with detailed worker task actions and health checks
                 completed = 0
-                logger.info(f"[WORKER-TASK] Starting monitoring of {len(future_to_account)} worker tasks")
+                total_workers = len(future_to_account)
+                logger.info(f"[WORKER-TASK] Starting monitoring of {total_workers} worker tasks")
+                
+                # Start health monitoring thread
+                health_monitor_thread = threading.Thread(
+                    target=self.monitor_workers_health, 
+                    args=(future_to_account,), 
+                    daemon=True
+                )
+                health_monitor_thread.start()
+                logger.info(f"[WORKER-TASK] Health monitoring thread started")
                 
                 for future in concurrent.futures.as_completed(future_to_account):
                     account = future_to_account[future]
@@ -1257,16 +1658,25 @@ STDERR OUTPUT:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
+            # Summary of instant credential collection results
+            logger.info("[WORKER-TASK] Summarizing instant credential collection results...")
+            print("\n" + "=" * 60)
+            print("� INSTANT CREDENTIAL COLLECTION SUMMARY")
+            print("=" * 60)
+            
+            # Check what files were collected instantly
+            instant_collection_summary = self.get_instant_collection_summary()
+            
             # Print final summary
-            self.print_summary(duration)
+            self.print_summary(duration, instant_collection_summary)
             return True
             
         except Exception as e:
             logger.error(f"Multi-threading error: {e}")
             return False
     
-    def print_summary(self, duration):
-        """Print automation summary"""
+    def print_summary(self, duration, collected_credentials=None):
+        """Print automation summary with credential collection information"""
         total = len(self.accounts)
         completed = self.completed_counter.get_value()
         failed = self.failed_counter.get_value()
@@ -1282,6 +1692,19 @@ STDERR OUTPUT:
             print(f"Average per Account: {duration/total:.1f} seconds")
             print(f"Success Rate: {(completed/total)*100:.1f}%")
         
+        # Credential collection summary
+        if collected_credentials is not None:
+            print(f"\nCREDENTIAL COLLECTION:")
+            print(f"Files Collected: {len(collected_credentials)}")
+            print(f"Collection Rate: {(len(collected_credentials)/total)*100:.1f}%")
+            if collected_credentials:
+                print(f"📁 Final Location: {self.final_credentials_dir}")
+                print("📄 Collected Files:")
+                for cred in collected_credentials[:5]:  # Show first 5
+                    print(f"   • {cred['filename']} ({cred['email']})")
+                if len(collected_credentials) > 5:
+                    print(f"   ... and {len(collected_credentials) - 5} more")
+        
         print("\nACCOUNT DETAILS:")
         print("-" * 60)
         for account in self.accounts:
@@ -1294,9 +1717,21 @@ STDERR OUTPUT:
             print(f"{status_icon} {account.email} - {account.status}{duration_text}")
             if account.error_message:
                 print(f"   Error: {account.error_message}")
+            
+            # Check if this account has collected credentials
+            if collected_credentials:
+                worker_id = list(self.accounts).index(account) + 1
+                account_creds = [c for c in collected_credentials if c['worker_id'] == worker_id]
+                if account_creds:
+                    print(f"   🎉 Credentials Collected: {len(account_creds)} file(s)")
+                    for cred in account_creds:
+                        print(f"   📄 {cred['filename']}")
+                else:
+                    print(f"   ❌ No credentials collected")
+            
             if account.credentials_path:
-                print(f"   📄 Credentials: {os.path.basename(account.credentials_path)}")
-                print(f"   📁 Full Path: {account.credentials_path}")
+                print(f"   📄 Original Credentials: {os.path.basename(account.credentials_path)}")
+                print(f"   📁 Original Path: {account.credentials_path}")
                 # Show file size and creation time
                 try:
                     file_size = os.path.getsize(account.credentials_path)
@@ -1306,7 +1741,7 @@ STDERR OUTPUT:
                 except:
                     pass
             else:
-                print(f"   ❌ No credentials file found")
+                print(f"   ❌ No credentials file found in worker directory")
                 # Show where to look
                 print(f"   🔍 Check: {account.worker_dir}\\downloads\\")
                 print(f"   🔍 Or: C:\\Users\\{os.getenv('USERNAME', '')}\\Downloads\\")
@@ -1315,6 +1750,9 @@ STDERR OUTPUT:
         
         print("="*60)
         print(f"Worker directories created in: {self.base_dir}")
+        if collected_credentials:
+            print(f"📁 All credentials collected in: {self.final_credentials_dir}")
+            print("📋 See 'credentials_collection_report.txt' for detailed information")
         print("Check individual worker directories for detailed logs and outputs.")
     
     def save_worker_output(self, account: EmailAccount, worker_id: int):
@@ -1388,10 +1826,13 @@ STDERR OUTPUT:
             except Exception as err_save_error:
                 logger.error(f"[DETAIL] Worker {worker_id}: Could not even save error file: {err_save_error}")
 
-    def create_unicode_safe_auto_py(self, worker_dir):
-        """Create a Unicode-safe version of auto.py for the worker"""
+    def create_unicode_safe_auto_py(self, worker_dir, worker_id=1):
+        """Create a Unicode-safe version of auto.py for the worker with worker-specific settings"""
         try:
+            import re
+            chrome_debug_port = 9222 + worker_id  # Unique port for each worker
             logger.info(f"[DETAIL] Reading original auto.py for Unicode-safe conversion in {worker_dir}")
+            logger.info(f"[DETAIL] Worker {worker_id} will use Chrome debug port {chrome_debug_port}")
             with open("auto.py", "r", encoding="utf-8") as f:
                 content = f.read()
             logger.info(f"[DETAIL] Read {len(content)} characters from auto.py")
@@ -1693,7 +2134,6 @@ def handle_2fa_popup(driver):
             
             # Find and replace the get_user_credentials_and_config function more carefully
             logger.info("[DETAIL] Attempting to replace get_user_credentials_and_config function")
-            import re
             
             # Also need to update handle_2fa_and_verification function to include popup handling
             logger.info("[DETAIL] Attempting to replace handle_2fa_and_verification function")
@@ -1954,6 +2394,42 @@ print("[INFO] Total automation timeout: 60 minutes")
                     break
             logger.info(f"[DETAIL] Inserting timeout protection at line {insert_index}")
             lines.insert(insert_index, timeout_protection)
+            content = '\n'.join(lines)
+            
+            # Replace Chrome debug port assignment to use worker-specific port
+            logger.info(f"[DETAIL] Updating Chrome debug port assignment to use port {chrome_debug_port}")
+            # Replace the find_available_port call with the specific port for this worker
+            port_replacement_patterns = [
+                (r'CHROME_DEBUG_PORT = find_available_port\(9222\)', f'CHROME_DEBUG_PORT = {chrome_debug_port}'),
+                (r'find_available_port\(9222\)', f'{chrome_debug_port}'),
+                (r'find_available_port\(\)', f'{chrome_debug_port}')
+            ]
+            
+            for pattern, replacement in port_replacement_patterns:
+                if re.search(pattern, content):
+                    content = re.sub(pattern, replacement, content)
+                    logger.info(f"[DETAIL] Replaced pattern '{pattern}' with port {chrome_debug_port}")
+            
+            # Also add a worker-specific identifier at the beginning for debugging
+            worker_identifier = f'''
+# WORKER {worker_id} INSTANCE - Chrome Debug Port: {chrome_debug_port}
+# Worker Email: {worker_dir.split(os.sep)[-1] if worker_dir else "unknown"}
+# Multi-threaded isolation enabled
+print(f"[WORKER] Starting Worker {worker_id} with Chrome debug port {chrome_debug_port}")
+
+'''
+            lines = content.split('\n')
+            # Insert after imports but before the first function/class
+            insert_index = 0
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if (stripped and not stripped.startswith('#') and not stripped.startswith('import') 
+                    and not stripped.startswith('from') and not stripped.startswith('print(')
+                    and not line.startswith('# WORKER') and not line.startswith('# Subprocess')):
+                    insert_index = i
+                    break
+            logger.info(f"[DETAIL] Inserting worker identifier at line {insert_index}")
+            lines.insert(insert_index, worker_identifier)
             content = '\n'.join(lines)
             
             # Write the modified auto.py to worker directory with comprehensive validation
@@ -2279,12 +2755,16 @@ def main():
     
     print(f"[OK] Loaded {len(automation.accounts)} accounts")
     
-    # Enhanced account validation and warnings
+    # Enhanced account validation and warnings with Gmail-specific checks
     gmail_accounts = [acc for acc in automation.accounts if "@gmail.com" in acc.email.lower()]
     non_gmail_accounts = [acc for acc in automation.accounts if "@gmail.com" not in acc.email.lower()]
     
     if gmail_accounts:
         print(f"[OK] Gmail accounts: {len(gmail_accounts)}")
+        for i, acc in enumerate(gmail_accounts[:5], 1):  # Show first 5
+            print(f"  {i}. {acc.email}")
+        if len(gmail_accounts) > 5:
+            print(f"  ... and {len(gmail_accounts) - 5} more")
     
     if non_gmail_accounts:
         print(f"WARNING: Non-Gmail accounts detected: {len(non_gmail_accounts)}")
@@ -2295,6 +2775,24 @@ def main():
         if response.lower() != 'y':
             print("Automation cancelled.")
             return
+    
+    # Check for account distribution and worker assignment
+    if len(automation.accounts) > max_workers:
+        print(f"INFO: {len(automation.accounts)} accounts will be processed using {max_workers} concurrent workers")
+        print(f"This means {len(automation.accounts) - max_workers} accounts will wait for workers to become available")
+        print("Each worker processes one account at a time for proper isolation")
+    elif len(automation.accounts) == max_workers:
+        print(f"PERFECT: {len(automation.accounts)} accounts with {max_workers} workers - optimal 1:1 ratio")
+    else:
+        print(f"INFO: {len(automation.accounts)} accounts with {max_workers} workers - some workers will be idle")
+    
+    # Chrome port assignment preview
+    print(f"\nChrome Debug Port Assignment:")
+    for i, acc in enumerate(automation.accounts[:max_workers], 1):
+        port = 9222 + i
+        print(f"  Worker {i}: {acc.email} -> Port {port}")
+    if len(automation.accounts) > max_workers:
+        print(f"  Remaining {len(automation.accounts) - max_workers} accounts will use available ports as workers complete")
     
     # Final confirmation with detailed information
     print()
@@ -2313,6 +2811,13 @@ def main():
     print("  4. Create project and enable Gmail API")
     print("  5. Setup OAuth consent screen")
     print("  6. Download credentials JSON")
+    print("  7. Collect all credentials in final folder")
+    print()
+    print("CREDENTIAL COLLECTION:")
+    print(f"  - All downloaded JSON files will be collected")
+    print(f"  - Final location: final_credentials_collection/")
+    print(f"  - Files renamed with worker and email info")
+    print(f"  - Summary report will be generated")
     print()
     print("IMPORTANT NOTES:")
     print("  - Each worker needs manual 2FA approval")
@@ -2368,6 +2873,8 @@ def main():
         print("  - worker_output.log (detailed output)")
         print("  - downloads/ (credentials if successful)")
         print("  - debug_worker_X.bat (for manual debugging)")
+        print(f"\n📁 All credential files collected in: {automation.final_credentials_dir}")
+        print("📋 Check 'credentials_collection_report.txt' for detailed credential information")
     
     input("\nPress Enter to exit...")
 
