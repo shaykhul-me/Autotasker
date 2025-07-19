@@ -125,7 +125,8 @@ class SubprocessMultiThreadedAutomation:
     def setup_worker_environment(self, account: EmailAccount, worker_id: int):
         """Setup isolated environment for a worker with comprehensive dependency handling"""
         try:
-            logger.info(f"Worker {worker_id}: Setting up isolated environment...")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Starting environment setup task")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Setting up isolated environment for {account.email}")
             
             # Create directories for new UI automation structure
             dirs_to_create = [
@@ -137,16 +138,18 @@ class SubprocessMultiThreadedAutomation:
                 'worker_data'
             ]
             
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating {len(dirs_to_create)} directories")
             for dir_name in dirs_to_create:
                 dir_path = os.path.join(account.worker_dir, dir_name)
                 os.makedirs(dir_path, exist_ok=True)
-                logger.info(f"Created directory: {dir_name}")
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Created directory: {dir_name}")
             
             # Create Unicode-safe version of auto.py
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating Unicode-safe auto.py")
             if not self.create_unicode_safe_auto_py(account.worker_dir):
-                logger.error(f"Worker {worker_id}: Failed to create Unicode-safe auto.py")
+                logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Could not create Unicode-safe auto.py")
                 return False
-            logger.info(f"Worker {worker_id}: Created Unicode-safe auto.py")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Unicode-safe auto.py created")
             
             # List of critical files that auto.py requires
             critical_files = [
@@ -167,55 +170,64 @@ class SubprocessMultiThreadedAutomation:
             ]
             
             # Copy critical files to worker directory
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Copying {len(critical_files)} critical files")
             missing_critical = []
             for filename in critical_files:
                 source_path = os.path.join(self.base_dir, filename)
                 dest_path = os.path.join(account.worker_dir, filename)
                 
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Processing critical file: {filename}")
                 if os.path.exists(source_path):
                     try:
                         shutil.copy2(source_path, dest_path)
-                        logger.info(f"Worker {worker_id}: Copied critical file {filename}")
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Copied critical file {filename}")
                     except Exception as copy_error:
-                        logger.error(f"Worker {worker_id}: Failed to copy {filename}: {copy_error}")
+                        logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Copy {filename}: {copy_error}")
                         missing_critical.append(filename)
                 else:
-                    logger.warning(f"Worker {worker_id}: Critical file {filename} not found")
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task SKIPPED - Critical file {filename} not found")
                     missing_critical.append(filename)
             
             # Check if we can proceed without critical files
             if missing_critical:
-                logger.warning(f"Worker {worker_id}: Missing critical files: {missing_critical}")
-                logger.info(f"Worker {worker_id}: Attempting to proceed anyway...")
+                logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task WARNING - Missing critical files: {missing_critical}")
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Attempting to proceed anyway...")
             
             # Copy optional files if they exist
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Processing {len(optional_files)} optional files")
             copied_optional = []
             for filename in optional_files:
                 source_path = os.path.join(self.base_dir, filename)
                 dest_path = os.path.join(account.worker_dir, filename)
                 
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Checking optional file: {filename}")
                 if os.path.exists(source_path):
                     try:
                         shutil.copy2(source_path, dest_path)
                         copied_optional.append(filename)
-                        logger.info(f"Worker {worker_id}: Copied optional file {filename}")
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Copied optional file {filename}")
                     except Exception as copy_error:
-                        logger.warning(f"Worker {worker_id}: Failed to copy optional file {filename}: {copy_error}")
+                        logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Copy optional file {filename}: {copy_error}")
+                else:
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task SKIPPED - Optional file {filename} not found")
             
             if copied_optional:
-                logger.info(f"Worker {worker_id}: Copied {len(copied_optional)} optional files")
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Copied {len(copied_optional)} optional files")
+            else:
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task INFO - No optional files copied")
             
             # Create comprehensive CSV files for account credentials
             # Primary CSV file (gmail_accounts.csv)
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating primary CSV file (gmail_accounts.csv)")
             accounts_csv = os.path.join(account.worker_dir, "gmail_accounts.csv")
             try:
                 with open(accounts_csv, 'w', newline='', encoding='utf-8') as file:
                     writer = csv.writer(file)
                     writer.writerow(['email', 'password'])
                     writer.writerow([account.email, account.password])
-                logger.info(f"Worker {worker_id}: Created gmail_accounts.csv")
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created gmail_accounts.csv")
             except Exception as csv_error:
-                logger.error(f"Worker {worker_id}: Failed to create gmail_accounts.csv: {csv_error}")
+                logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create gmail_accounts.csv: {csv_error}")
                 return False
             
             # Backup CSV files with alternative names
@@ -225,15 +237,18 @@ class SubprocessMultiThreadedAutomation:
                 "gmail_multi_accounts_template.csv"
             ]
             
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating {len(backup_csv_files)} backup CSV files")
             for backup_name in backup_csv_files:
                 backup_path = os.path.join(account.worker_dir, backup_name)
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating backup CSV: {backup_name}")
                 try:
                     with open(backup_path, 'w', newline='', encoding='utf-8') as file:
                         writer = csv.writer(file)
                         writer.writerow(['email', 'password'])
                         writer.writerow([account.email, account.password])
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created backup CSV {backup_name}")
                 except Exception as backup_error:
-                    logger.warning(f"Worker {worker_id}: Failed to create backup CSV {backup_name}: {backup_error}")
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create backup CSV {backup_name}: {backup_error}")
             
             # Create comprehensive directory structure
             directories_to_create = [
@@ -245,15 +260,18 @@ class SubprocessMultiThreadedAutomation:
                 "downloads/account_credentials"  # Specific for credentials
             ]
             
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating {len(directories_to_create)} additional directories")
             for dir_name in directories_to_create:
                 dir_path = os.path.join(account.worker_dir, dir_name)
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating directory: {dir_name}")
                 try:
                     os.makedirs(dir_path, exist_ok=True)
-                    logger.info(f"Worker {worker_id}: Created directory {dir_name}")
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created directory {dir_name}")
                 except Exception as dir_error:
-                    logger.warning(f"Worker {worker_id}: Failed to create directory {dir_name}: {dir_error}")
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create directory {dir_name}: {dir_error}")
             
             # Create a worker-specific configuration file
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating worker configuration file")
             config_content = f'''# Worker {worker_id} Configuration
 EMAIL = "{account.email}"
 WORKER_ID = {worker_id}
@@ -272,12 +290,13 @@ DEBUG_MODE = True
             try:
                 with open(config_path, 'w', encoding='utf-8') as f:
                     f.write(config_content)
-                logger.info(f"Worker {worker_id}: Created worker configuration")
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created worker configuration")
             except Exception as config_error:
-                logger.warning(f"Worker {worker_id}: Failed to create worker config: {config_error}")
+                logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create worker config: {config_error}")
             
             # Create a batch file for manual debugging (Windows)
             if sys.platform == "win32":
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating Windows debug batch file")
                 batch_content = f'''@echo off
 echo Worker {worker_id} Debug Environment
 echo Working Directory: {account.worker_dir}
@@ -293,11 +312,14 @@ cmd /k
                 try:
                     with open(batch_path, 'w', encoding='utf-8') as f:
                         f.write(batch_content)
-                    logger.info(f"Worker {worker_id}: Created debug batch file")
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created debug batch file")
                 except Exception as batch_error:
-                    logger.warning(f"Worker {worker_id}: Failed to create debug batch: {batch_error}")
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create debug batch: {batch_error}")
+            else:
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task SKIPPED - Debug batch file (non-Windows platform)")
             
             # Create a requirements.txt specific to this worker for debugging
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating worker requirements.txt")
             worker_requirements = '''selenium>=4.0.0
 undetected-chromedriver>=3.5.0
 pyautogui>=0.9.54
@@ -309,12 +331,12 @@ psutil>=5.9.0
             try:
                 with open(req_path, 'w', encoding='utf-8') as f:
                     f.write(worker_requirements)
-                logger.info(f"Worker {worker_id}: Created worker requirements.txt")
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Created worker requirements.txt")
             except Exception as req_error:
-                logger.warning(f"Worker {worker_id}: Failed to create requirements: {req_error}")
+                logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Create requirements: {req_error}")
             
-            logger.info(f"Worker {worker_id}: Environment setup complete")
-            logger.info(f"Worker {worker_id}: Ready to process {account.email}")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Environment setup complete")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task READY - Ready to process {account.email}")
             return True
             
         except Exception as e:
@@ -323,6 +345,8 @@ psutil>=5.9.0
     
     def run_single_account_subprocess(self, account: EmailAccount, worker_id: int):
         """Run automation for a single account using subprocess with advanced parallel processing"""
+        logger.info(f"[WORKER-TASK] Worker {worker_id}: STARTING automation task for {account.email}")
+        
         account.thread_id = worker_id
         account.start_time = datetime.now()
         account.status = "running"
@@ -334,28 +358,42 @@ psutil>=5.9.0
         max_retries = 2
         
         try:
-            logger.info(f"Worker {worker_id}: Starting advanced automation for {account.email}")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Initializing advanced automation")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Account: {account.email}")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Max retries: {max_retries}")
             
             # Setup worker environment with advanced isolation
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Setting up worker environment")
             if not self.setup_worker_environment(account, worker_id):
+                logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Environment setup failed")
                 raise Exception("Failed to setup worker environment")
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Environment setup successful")
             
             # Advanced Chrome port management for true parallel execution
             chrome_port = 9222 + worker_id  # Unique port per worker
             debug_port = chrome_port + 1000  # Separate debug port
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Port assignment")
+            logger.info(f"[DETAIL] Worker {worker_id}: Assigned Chrome port {chrome_port}, debug port {debug_port}")
             
             # Change to worker directory with lock protection
             original_cwd = os.getcwd()
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Directory management")
+            logger.info(f"[DETAIL] Worker {worker_id}: Changing from {original_cwd} to {account.worker_dir}")
             with worker_lock:
                 os.chdir(account.worker_dir)
+            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Directory changed")
+            logger.info(f"[DETAIL] Worker {worker_id}: Successfully changed to worker directory")
             
             try:
                 # Advanced retry loop for subprocess execution
+                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Starting subprocess execution loop")
                 for attempt in range(max_retries + 1):
                     try:
-                        logger.info(f"Worker {worker_id}: Launching auto.py subprocess (attempt {attempt + 1})...")
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Subprocess attempt {attempt + 1}/{max_retries + 1}")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Launching auto.py subprocess (attempt {attempt + 1}/{max_retries + 1})")
                         
                         # Advanced environment variables for complete isolation
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Setting up environment variables")
                         env = os.environ.copy()
                         env['PYTHONIOENCODING'] = 'utf-8'
                         env['PYTHONUNBUFFERED'] = '1'
@@ -375,13 +413,26 @@ psutil>=5.9.0
                         env['TEMP_DIR'] = os.path.join(account.worker_dir, 'temp')
                         env['DOWNLOADS_DIR'] = os.path.join(account.worker_dir, 'downloads')
                         
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Environment variables set")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Environment setup complete - {len(env)} variables set")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Chrome profile dir: {env['CHROME_PROFILE_DIR']}")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Chrome user data dir: {env['CHROME_USER_DATA_DIR']}")
+                        
                         # Ensure Chrome processes from previous attempts are fully cleaned
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Pre-launch Chrome cleanup")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Starting Chrome cleanup before subprocess launch")
                         self.advanced_chrome_cleanup(worker_id)
                         time.sleep(2)  # Give cleanup time to complete
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Chrome cleanup")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Chrome cleanup completed, proceeding with subprocess")
                         
                         # Create subprocess with advanced isolation and error handling
                         # For Windows, create with new console to allow interactive input
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Creating subprocess")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Creating subprocess on platform: {sys.platform}")
                         if sys.platform == "win32":
+                            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Windows subprocess creation")
+                            logger.info(f"[DETAIL] Worker {worker_id}: Using Windows subprocess with CREATE_NEW_CONSOLE")
                             process = subprocess.Popen(
                                 [sys.executable, "-u", "auto.py"],
                                 stdout=subprocess.PIPE,
@@ -396,6 +447,8 @@ psutil>=5.9.0
                             )
                         else:
                             # For non-Windows systems
+                            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Unix subprocess creation")
+                            logger.info(f"[DETAIL] Worker {worker_id}: Using Unix-style subprocess")
                             process = subprocess.Popen(
                                 [sys.executable, "-u", "auto.py"],
                                 stdout=subprocess.PIPE,
@@ -408,25 +461,35 @@ psutil>=5.9.0
                                 env=env
                             )
                         
-                        logger.info(f"Worker {worker_id}: Process started successfully (PID: {process.pid})")
+                        logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Subprocess created successfully")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Process created successfully (PID: {process.pid})")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Command: {sys.executable} -u auto.py")
+                        logger.info(f"[DETAIL] Worker {worker_id}: Working directory: {account.worker_dir}")
                         break  # Success, exit retry loop
                         
                     except Exception as subprocess_error:
-                        logger.warning(f"Worker {worker_id}: Subprocess creation failed (attempt {attempt + 1}): {subprocess_error}")
+                        logger.error(f"[DETAIL] Worker {worker_id}: Subprocess creation failed (attempt {attempt + 1}/{max_retries + 1})")
+                        logger.error(f"[DETAIL] Worker {worker_id}: Error details: {str(subprocess_error)}")
+                        logger.error(f"[DETAIL] Worker {worker_id}: Error type: {type(subprocess_error).__name__}")
                         if attempt < max_retries:
                             # Clean up and retry
+                            logger.info(f"[DETAIL] Worker {worker_id}: Cleaning up for retry attempt")
                             self.advanced_chrome_cleanup(worker_id)
                             time.sleep(5)  # Wait before retry
+                            logger.info(f"[DETAIL] Worker {worker_id}: Cleanup completed, will retry in next iteration")
                         else:
+                            logger.error(f"[DETAIL] Worker {worker_id}: All retry attempts exhausted")
                             raise Exception(f"Failed to create subprocess after {max_retries + 1} attempts: {subprocess_error}")
                 
                 if process is None:
+                    logger.error(f"[DETAIL] Worker {worker_id}: Process object is None after all attempts")
                     raise Exception("Failed to create subprocess process")
                 
                 
                 # Advanced process monitoring with real-time health checks
                 try:
-                    logger.info(f"Worker {worker_id}: Starting advanced process monitoring...")
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Starting process monitoring")
+                    logger.info(f"[DETAIL] Worker {worker_id}: Starting advanced process monitoring...")
                     
                     # Extended timeout with intelligent monitoring for manual interaction
                     timeout_seconds = 3600  # 60 minutes base timeout (increased for manual steps)
@@ -435,67 +498,98 @@ psutil>=5.9.0
                     process_health_checks = 0
                     max_health_checks = timeout_seconds // check_interval
                     
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Monitoring configuration set")
+                    logger.info(f"[DETAIL] Worker {worker_id}: Monitoring config - timeout: {timeout_seconds}s, interval: {check_interval}s, max checks: {max_health_checks}")
+                    
                     # Advanced monitoring loop
+                    logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Entering monitoring loop")
                     while process.poll() is None and process_health_checks < max_health_checks:
                         try:
                             # Wait for process with shorter intervals for monitoring
+                            logger.debug(f"[WORKER-TASK] Worker {worker_id}: Task - Waiting for process communication")
+                            logger.debug(f"[DETAIL] Worker {worker_id}: Waiting for process communication (timeout: {check_interval}s)")
                             stdout, stderr = process.communicate(timeout=check_interval)
                             # If we get here, process completed normally
+                            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Process finished normally")
+                            logger.info(f"[DETAIL] Worker {worker_id}: Process completed normally during monitoring")
                             break
                         except subprocess.TimeoutExpired:
                             # Process still running, perform health checks
                             process_health_checks += 1
                             current_time = time.time()
+                            elapsed_time = current_time - (account.start_time.timestamp() if account.start_time else current_time)
+                            
+                            logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Health check {process_health_checks}/{max_health_checks}")
+                            logger.info(f"[DETAIL] Worker {worker_id}: Health check {process_health_checks}/{max_health_checks} - elapsed: {elapsed_time:.1f}s")
                             
                             # Check if Chrome processes are still alive
+                            logger.debug(f"[WORKER-TASK] Worker {worker_id}: Task - Checking Chrome process health")
                             chrome_alive = self.check_chrome_processes_health(worker_id)
                             
                             if chrome_alive:
-                                logger.info(f"Worker {worker_id}: Health check {process_health_checks}/{max_health_checks} - Chrome processes active")
+                                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task STATUS - Chrome processes healthy")
+                                logger.info(f"[DETAIL] Worker {worker_id}: Chrome processes detected and healthy")
                                 last_activity_check = current_time
                             else:
-                                logger.warning(f"Worker {worker_id}: No Chrome processes detected - may be manual interaction phase")
+                                time_without_chrome = current_time - last_activity_check
+                                logger.warning(f"[WORKER-TASK] Worker {worker_id}: Task WARNING - No Chrome processes ({time_without_chrome:.1f}s)")
+                                logger.warning(f"[DETAIL] Worker {worker_id}: No Chrome processes detected - {time_without_chrome:.1f}s without Chrome (may be manual interaction)")
                                 # If Chrome died, the automation likely failed, but be more lenient for manual interaction
-                                if current_time - last_activity_check > 300:  # 5 minutes without Chrome (increased)
-                                    logger.error(f"Worker {worker_id}: Chrome processes missing for too long, terminating")
+                                if time_without_chrome > 300:  # 5 minutes without Chrome (increased)
+                                    logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Chrome timeout exceeded")
+                                    logger.error(f"[DETAIL] Worker {worker_id}: Chrome processes missing for {time_without_chrome:.1f}s (>300s limit), terminating")
                                     break
                             
                             # Check system resources
                             if process_health_checks % 4 == 0:  # Every 2 minutes
+                                logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - System resource check")
+                                logger.info(f"[DETAIL] Worker {worker_id}: Performing system resource check (every 4th health check)")
                                 self.log_system_resources(worker_id)
                             
                             continue
                     
                     # Get final output if process completed during monitoring
                     if process.poll() is not None:
+                        logger.info(f"[DETAIL] Worker {worker_id}: Process completed, collecting final output")
                         try:
                             remaining_stdout, remaining_stderr = process.communicate(timeout=30)
                             stdout = (stdout or "") + (remaining_stdout or "")
                             stderr = (stderr or "") + (remaining_stderr or "")
-                        except:
+                            logger.info(f"[DETAIL] Worker {worker_id}: Collected stdout: {len(stdout)} chars, stderr: {len(stderr)} chars")
+                        except Exception as output_error:
+                            logger.warning(f"[DETAIL] Worker {worker_id}: Error collecting final output: {output_error}")
                             stdout = stdout or ""
                             stderr = stderr or ""
                     else:
                         # Process still running after timeout
-                        logger.warning(f"Worker {worker_id}: Process timeout after monitoring - attempting graceful shutdown")
+                        logger.warning(f"[DETAIL] Worker {worker_id}: Process timeout after {timeout_seconds}s monitoring - attempting graceful shutdown")
                         try:
                             # Try graceful termination first
+                            logger.info(f"[DETAIL] Worker {worker_id}: Sending SIGTERM for graceful termination")
                             process.terminate()
                             stdout, stderr = process.communicate(timeout=30)
+                            logger.info(f"[DETAIL] Worker {worker_id}: Graceful termination successful")
                         except subprocess.TimeoutExpired:
                             # Force kill if graceful termination fails
-                            logger.warning(f"Worker {worker_id}: Graceful termination failed, force killing process")
+                            logger.error(f"[DETAIL] Worker {worker_id}: Graceful termination failed after 30s, force killing process")
                             process.kill()
                             try:
                                 stdout, stderr = process.communicate(timeout=10)
-                            except:
+                                logger.warning(f"[DETAIL] Worker {worker_id}: Force kill completed")
+                            except Exception as kill_error:
+                                logger.error(f"[DETAIL] Worker {worker_id}: Error during force kill: {kill_error}")
                                 stdout, stderr = "", "Process was force killed due to timeout"
+                        except Exception as term_error:
+                            logger.error(f"[DETAIL] Worker {worker_id}: Error during termination: {term_error}")
+                            stdout, stderr = "", f"Termination error: {term_error}"
                         
                         raise Exception(f"Process monitoring timeout after {timeout_seconds/60:.1f} minutes")
                     
                     return_code = process.returncode
+                    logger.info(f"[DETAIL] Worker {worker_id}: Process return code: {return_code}")
                     
                     # Store complete output with enhanced formatting
+                    logger.info(f"[DETAIL] Worker {worker_id}: Formatting and storing process output")
                     account.process_output = self.format_process_output(return_code, stdout, stderr, worker_id)
                     
                     # Enhanced output logging with intelligent truncation
@@ -555,8 +649,37 @@ psutil>=5.9.0
                     has_success = any(indicator.lower() in output_text for indicator in success_indicators)
                     has_errors = any(indicator.lower() in output_text for indicator in error_indicators)
                     
+                    logger.info(f"[DETAIL] Worker {worker_id}: Output analysis - success indicators: {has_success}, error indicators: {has_errors}")
+                    logger.info(f"[DETAIL] Worker {worker_id}: Total output length: {len(output_text)} characters")
+                    
                     # Enhanced completion analysis
                     if return_code == 0 or has_success:
+                        if has_errors:
+                            logger.warning(f"[DETAIL] Worker {worker_id}: Mixed results - success indicators found but also errors detected")
+                        else:
+                            logger.info(f"[DETAIL] Worker {worker_id}: Clear success - return code 0 or success indicators without errors")
+                        
+                        # Additional validation through completion verification
+                        logger.info(f"[DETAIL] Worker {worker_id}: Running automation completion verification")
+                        completion_score = self.verify_automation_completion(account)
+                        logger.info(f"[DETAIL] Worker {worker_id}: Completion verification score: {completion_score}/5")
+                        
+                        if completion_score >= 3:  # At least 3 out of 5 steps completed
+                            account.status = "completed"
+                            self.completed_counter.increment()
+                            logger.info(f"[DETAIL] Worker {worker_id}: Final status: COMPLETED (score: {completion_score}/5)")
+                        else:
+                            account.status = "partial"  # Partial completion
+                            self.failed_counter.increment()
+                            logger.warning(f"[DETAIL] Worker {worker_id}: Final status: PARTIAL (low completion score: {completion_score}/5)")
+                        
+                        # Find and log credentials
+                        logger.info(f"[DETAIL] Worker {worker_id}: Searching for credentials files")
+                        self.find_credentials_file(account)
+                        if account.credentials_path:
+                            logger.info(f"[DETAIL] Worker {worker_id}: Credentials found at: {account.credentials_path}")
+                        else:
+                            logger.warning(f"[DETAIL] Worker {worker_id}: No credentials file found")
                         if has_errors:
                             logger.warning(f"Worker {worker_id}: Completed with warnings - analyzing severity")
                             # Check if errors are critical
@@ -606,31 +729,48 @@ psutil>=5.9.0
                 
             finally:
                 # Advanced cleanup with lock protection
+                logger.info(f"[DETAIL] Worker {worker_id}: Starting cleanup phase")
                 with worker_lock:
+                    logger.info(f"[DETAIL] Worker {worker_id}: Acquired cleanup lock, changing directory back to {original_cwd}")
                     os.chdir(original_cwd)
+                    logger.info(f"[DETAIL] Worker {worker_id}: Directory change completed")
                 
                 # Comprehensive Chrome cleanup with multiple attempts
+                logger.info(f"[DETAIL] Worker {worker_id}: Starting comprehensive Chrome cleanup")
                 for cleanup_attempt in range(3):
                     try:
+                        logger.info(f"[DETAIL] Worker {worker_id}: Chrome cleanup attempt {cleanup_attempt + 1}/3")
                         self.advanced_chrome_cleanup(worker_id)
                         time.sleep(2)
                         if not self.check_chrome_processes_health(worker_id):
+                            logger.info(f"[DETAIL] Worker {worker_id}: Chrome cleanup successful on attempt {cleanup_attempt + 1}")
                             break  # Cleanup successful
+                        else:
+                            logger.warning(f"[DETAIL] Worker {worker_id}: Chrome processes still detected after cleanup attempt {cleanup_attempt + 1}")
                     except Exception as cleanup_error:
-                        logger.warning(f"Worker {worker_id}: Cleanup attempt {cleanup_attempt + 1} failed: {cleanup_error}")
+                        logger.error(f"[DETAIL] Worker {worker_id}: Cleanup attempt {cleanup_attempt + 1} failed: {cleanup_error}")
                 
                 # Final resource cleanup
                 if process and process.poll() is None:
+                    logger.warning(f"[DETAIL] Worker {worker_id}: Process still running after automation, forcing termination")
                     try:
                         process.terminate()
                         process.wait(timeout=10)
-                    except:
+                        logger.info(f"[DETAIL] Worker {worker_id}: Process termination successful")
+                    except Exception as term_error:
+                        logger.error(f"[DETAIL] Worker {worker_id}: Process termination failed: {term_error}")
                         try:
                             process.kill()
-                        except:
-                            pass
+                            logger.warning(f"[DETAIL] Worker {worker_id}: Process force killed")
+                        except Exception as kill_error:
+                            logger.error(f"[DETAIL] Worker {worker_id}: Process force kill failed: {kill_error}")
+                else:
+                    logger.info(f"[DETAIL] Worker {worker_id}: Process already terminated, no cleanup needed")
             
         except Exception as e:
+            logger.error(f"[DETAIL] Worker {worker_id}: Exception caught in main automation loop")
+            logger.error(f"[DETAIL] Worker {worker_id}: Exception type: {type(e).__name__}")
+            logger.error(f"[DETAIL] Worker {worker_id}: Exception message: {str(e)}")
             account.status = "failed"
             account.error_message = str(e)
             self.failed_counter.increment()
@@ -641,9 +781,16 @@ psutil>=5.9.0
             account.end_time = datetime.now()
             if account.start_time and account.end_time:
                 duration = (account.end_time - account.start_time).total_seconds()
-                logger.info(f"Worker {worker_id}: Completed {account.email} in {duration:.1f} seconds")
+                logger.info(f"[DETAIL] Worker {worker_id}: Total execution time for {account.email}: {duration:.1f} seconds")
+                if duration > 1800:  # More than 30 minutes
+                    logger.warning(f"[DETAIL] Worker {worker_id}: Long execution time detected ({duration/60:.1f} minutes)")
+                elif duration < 60:  # Less than 1 minute
+                    logger.warning(f"[DETAIL] Worker {worker_id}: Very short execution time ({duration:.1f}s) - possible early failure")
+            else:
+                logger.warning(f"[DETAIL] Worker {worker_id}: Could not calculate execution time - missing start/end times")
             
             # Save comprehensive worker output for debugging
+            logger.info(f"[DETAIL] Worker {worker_id}: Saving worker output to log file")
             self.save_worker_output(account, worker_id)
     
     def verify_automation_completion(self, account: EmailAccount):
@@ -930,27 +1077,120 @@ STDERR OUTPUT:
         try:
             import glob
             
+            logger.info(f"[WORKER-TASK] Searching for downloaded JSON credentials for {account.email}")
+            logger.info(f"[DETAIL] Worker directory: {account.worker_dir}")
+            
             # Look for JSON credentials in worker directory and subdirectories
             patterns = [
                 os.path.join(account.worker_dir, "*.json"),
                 os.path.join(account.worker_dir, "**", "*.json"),
-                os.path.join(account.worker_dir, "downloads", "*.json")
+                os.path.join(account.worker_dir, "downloads", "*.json"),
+                os.path.join(account.worker_dir, "downloads", "**", "*.json"),
+                os.path.join(account.worker_dir, "credentials", "*.json"),
+                os.path.join(account.worker_dir, "temp", "*.json"),
+                # Also check common download locations
+                os.path.join(os.path.expanduser("~"), "Downloads", "*.json"),
+                os.path.join("C:\\Users", os.getenv("USERNAME", ""), "Downloads", "*.json") if os.name == 'nt' else "",
             ]
+            
+            # Remove empty patterns (for non-Windows systems)
+            patterns = [p for p in patterns if p]
+            
+            logger.info(f"[DETAIL] Searching in {len(patterns)} locations for JSON files:")
+            for i, pattern in enumerate(patterns, 1):
+                logger.info(f"[DETAIL] Location {i}: {pattern}")
             
             json_files = []
             for pattern in patterns:
-                json_files.extend(glob.glob(pattern, recursive=True))
+                try:
+                    found_files = glob.glob(pattern, recursive=True)
+                    if found_files:
+                        logger.info(f"[DETAIL] Found {len(found_files)} JSON files in pattern: {pattern}")
+                        for file in found_files:
+                            logger.info(f"[DETAIL] JSON file found: {file}")
+                    json_files.extend(found_files)
+                except Exception as pattern_error:
+                    logger.warning(f"[DETAIL] Error searching pattern {pattern}: {pattern_error}")
             
-            if json_files:
-                # Get the most recent file
-                latest_file = max(json_files, key=os.path.getctime)
+            # Remove duplicates and filter for actual credential files
+            unique_json_files = list(set(json_files))
+            credential_files = []
+            
+            logger.info(f"[DETAIL] Found {len(unique_json_files)} total JSON files, filtering for credentials...")
+            
+            for json_file in unique_json_files:
+                try:
+                    # Check if file actually exists and is readable
+                    if os.path.exists(json_file) and os.path.isfile(json_file):
+                        file_size = os.path.getsize(json_file)
+                        logger.info(f"[DETAIL] Checking JSON file: {json_file} (size: {file_size} bytes)")
+                        
+                        # Quick check if it looks like a Google credentials file
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            content = f.read(1000)  # Read first 1000 chars
+                            if any(keyword in content.lower() for keyword in [
+                                'client_id', 'client_secret', 'auth_uri', 'token_uri', 
+                                'googleapis.com', 'oauth2', 'web', 'installed'
+                            ]):
+                                credential_files.append(json_file)
+                                logger.info(f"[DETAIL] Confirmed as credential file: {json_file}")
+                            else:
+                                logger.info(f"[DETAIL] Not a credential file (missing OAuth keywords): {json_file}")
+                    else:
+                        logger.warning(f"[DETAIL] File doesn't exist or not readable: {json_file}")
+                except Exception as file_error:
+                    logger.warning(f"[DETAIL] Error checking file {json_file}: {file_error}")
+            
+            if credential_files:
+                # Get the most recent credential file
+                latest_file = max(credential_files, key=os.path.getctime)
                 account.credentials_path = latest_file
-                logger.info(f"Found credentials: {os.path.basename(latest_file)}")
+                
+                # Get file details
+                file_size = os.path.getsize(latest_file)
+                file_time = datetime.fromtimestamp(os.path.getctime(latest_file))
+                
+                logger.info(f"[WORKER-TASK] ✅ CREDENTIALS FOUND!")
+                logger.info(f"[DETAIL] File: {latest_file}")
+                logger.info(f"[DETAIL] Size: {file_size} bytes")
+                logger.info(f"[DETAIL] Created: {file_time}")
+                logger.info(f"[DETAIL] Directory: {os.path.dirname(latest_file)}")
+                
+                # Also print to console for immediate visibility
+                print(f"\n🎉 CREDENTIALS FOUND for {account.email}:")
+                print(f"📄 File: {os.path.basename(latest_file)}")
+                print(f"📁 Location: {latest_file}")
+                print(f"📏 Size: {file_size} bytes")
+                print(f"⏰ Created: {file_time}")
+                
             else:
-                logger.warning(f"No credentials file found for {account.email}")
+                logger.warning(f"[WORKER-TASK] ❌ NO CREDENTIALS FOUND for {account.email}")
+                logger.warning(f"[DETAIL] Searched {len(patterns)} locations")
+                logger.warning(f"[DETAIL] Found {len(unique_json_files)} JSON files but none were credential files")
+                
+                # List all directories that were checked
+                checked_dirs = []
+                for pattern in patterns:
+                    base_dir = os.path.dirname(pattern) if "*" in pattern else pattern
+                    if os.path.exists(base_dir):
+                        checked_dirs.append(base_dir)
+                
+                logger.info(f"[DETAIL] Directories that exist and were checked:")
+                for dir_path in set(checked_dirs):
+                    if os.path.exists(dir_path):
+                        logger.info(f"[DETAIL] ✓ {dir_path}")
+                    else:
+                        logger.info(f"[DETAIL] ✗ {dir_path} (doesn't exist)")
+                        
+                print(f"\n❌ No credentials found for {account.email}")
+                print(f"🔍 Searched locations:")
+                for dir_path in set(checked_dirs)[:5]:  # Show first 5 locations
+                    print(f"   📁 {dir_path}")
             
         except Exception as e:
-            logger.warning(f"Error finding credentials for {account.email}: {e}")
+            logger.error(f"[WORKER-TASK] Error searching for credentials for {account.email}: {e}")
+            logger.error(f"[DETAIL] Exception type: {type(e).__name__}")
+            print(f"\n⚠️ Error searching for credentials for {account.email}: {e}")
     
     def run_automation(self):
         """Run automation for all accounts using thread pool"""
@@ -972,18 +1212,47 @@ STDERR OUTPUT:
                     for worker_id, account in enumerate(self.accounts, 1)
                 }
                 
-                # Monitor progress
+                # Monitor progress with detailed worker task actions
                 completed = 0
+                logger.info(f"[WORKER-TASK] Starting monitoring of {len(future_to_account)} worker tasks")
+                
                 for future in concurrent.futures.as_completed(future_to_account):
                     account = future_to_account[future]
                     completed += 1
                     
+                    logger.info(f"[WORKER-TASK] Task completed for worker monitoring - Account: {account.email}")
+                    logger.info(f"[WORKER-TASK] Progress: {completed}/{len(self.accounts)} tasks completed")
+                    
                     try:
                         result = future.result()
                         status = "SUCCESS" if result else "FAILED"
-                        logger.info(f"Progress: {completed}/{len(self.accounts)} - {account.email} - {status}")
+                        logger.info(f"[WORKER-TASK] Task result for {account.email}: {status}")
+                        logger.info(f"[WORKER-TASK] Account final status: {account.status}")
+                        logger.info(f"[WORKER-TASK] Worker directory: {account.worker_dir}")
+                        
+                        # Log detailed task completion information
+                        if account.start_time and account.end_time:
+                            task_duration = (account.end_time - account.start_time).total_seconds()
+                            logger.info(f"[WORKER-TASK] Task duration: {task_duration:.1f} seconds")
+                            if task_duration > 600:  # More than 10 minutes
+                                logger.warning(f"[WORKER-TASK] Long-running task detected for {account.email}")
+                        
+                        # Log credential discovery results
+                        if hasattr(account, 'credentials_path') and account.credentials_path:
+                            logger.info(f"[WORKER-TASK] Credentials found: {os.path.basename(account.credentials_path)}")
+                        else:
+                            logger.warning(f"[WORKER-TASK] No credentials found for {account.email}")
+                        
+                        # Log any errors encountered
+                        if account.error_message:
+                            logger.error(f"[WORKER-TASK] Task error for {account.email}: {account.error_message}")
+                        
+                        logger.info(f"[WORKER-TASK] Overall progress: {completed}/{len(self.accounts)} - {account.email} - {status}")
+                        
                     except Exception as e:
-                        logger.error(f"Task exception for {account.email}: {e}")
+                        logger.error(f"[WORKER-TASK] Task exception for {account.email}: {str(e)}")
+                        logger.error(f"[WORKER-TASK] Exception type: {type(e).__name__}")
+                        logger.error(f"[WORKER-TASK] Progress: {completed}/{len(self.accounts)} - {account.email} - EXCEPTION")
             
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
@@ -1026,9 +1295,23 @@ STDERR OUTPUT:
             if account.error_message:
                 print(f"   Error: {account.error_message}")
             if account.credentials_path:
-                print(f"   Credentials: {os.path.basename(account.credentials_path)}")
+                print(f"   📄 Credentials: {os.path.basename(account.credentials_path)}")
+                print(f"   📁 Full Path: {account.credentials_path}")
+                # Show file size and creation time
+                try:
+                    file_size = os.path.getsize(account.credentials_path)
+                    file_time = datetime.fromtimestamp(os.path.getctime(account.credentials_path))
+                    print(f"   📏 Size: {file_size} bytes")
+                    print(f"   ⏰ Created: {file_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                except:
+                    pass
+            else:
+                print(f"   ❌ No credentials file found")
+                # Show where to look
+                print(f"   🔍 Check: {account.worker_dir}\\downloads\\")
+                print(f"   🔍 Or: C:\\Users\\{os.getenv('USERNAME', '')}\\Downloads\\")
             if hasattr(account, 'worker_dir'):
-                print(f"   Worker Dir: {account.worker_dir}")
+                print(f"   📂 Worker Dir: {account.worker_dir}")
         
         print("="*60)
         print(f"Worker directories created in: {self.base_dir}")
@@ -1037,29 +1320,81 @@ STDERR OUTPUT:
     def save_worker_output(self, account: EmailAccount, worker_id: int):
         """Save worker output to a log file for debugging"""
         try:
+            logger.info(f"[DETAIL] Worker {worker_id}: Starting worker output save process")
             if account.process_output:
                 output_file = os.path.join(account.worker_dir, "worker_output.log")
+                logger.info(f"[DETAIL] Worker {worker_id}: Saving output to {output_file}")
+                
+                # Calculate output statistics
+                output_lines = account.process_output.count('\n')
+                output_size = len(account.process_output)
+                logger.info(f"[DETAIL] Worker {worker_id}: Output statistics - {output_lines} lines, {output_size} characters")
+                
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(f"Worker {worker_id} Output for {account.email}\n")
                     f.write("="*60 + "\n")
                     f.write(f"Status: {account.status}\n")
                     f.write(f"Start Time: {account.start_time}\n")
                     f.write(f"End Time: {account.end_time}\n")
+                    if account.start_time and account.end_time:
+                        duration = (account.end_time - account.start_time).total_seconds()
+                        f.write(f"Duration: {duration:.1f} seconds\n")
+                    f.write(f"Worker Directory: {account.worker_dir}\n")
+                    f.write(f"Thread ID: {getattr(account, 'thread_id', 'N/A')}\n")
                     if account.error_message:
                         f.write(f"Error: {account.error_message}\n")
+                    if hasattr(account, 'credentials_path') and account.credentials_path:
+                        f.write(f"Credentials: {account.credentials_path}\n")
+                    f.write(f"Output Size: {output_size} characters, {output_lines} lines\n")
                     f.write("\n" + "="*60 + "\n")
                     f.write(account.process_output)
-                logger.info(f"Worker {worker_id}: Output saved to worker_output.log")
+                
+                logger.info(f"[DETAIL] Worker {worker_id}: Output successfully saved to worker_output.log")
+                
+                # Also create a summary file with key information
+                summary_file = os.path.join(account.worker_dir, "worker_summary.txt")
+                logger.info(f"[DETAIL] Worker {worker_id}: Creating summary file at {summary_file}")
+                with open(summary_file, 'w', encoding='utf-8') as f:
+                    f.write(f"Worker {worker_id} Summary\n")
+                    f.write("="*30 + "\n")
+                    f.write(f"Email: {account.email}\n")
+                    f.write(f"Status: {account.status}\n")
+                    f.write(f"Worker Directory: {account.worker_dir}\n")
+                    if account.start_time and account.end_time:
+                        duration = (account.end_time - account.start_time).total_seconds()
+                        f.write(f"Duration: {duration:.1f} seconds\n")
+                    if account.error_message:
+                        f.write(f"Error: {account.error_message}\n")
+                    if hasattr(account, 'credentials_path') and account.credentials_path:
+                        f.write(f"Credentials: {os.path.basename(account.credentials_path)}\n")
+                    else:
+                        f.write("Credentials: Not found\n")
+                
+                logger.info(f"[DETAIL] Worker {worker_id}: Summary file created successfully")
+            else:
+                logger.warning(f"[DETAIL] Worker {worker_id}: No process output to save")
         except Exception as e:
-            logger.warning(f"Worker {worker_id}: Could not save output: {e}")
+            logger.error(f"[DETAIL] Worker {worker_id}: Failed to save output - error: {str(e)}")
+            logger.error(f"[DETAIL] Worker {worker_id}: Error type: {type(e).__name__}")
+            # Try to save at least basic information
+            try:
+                error_file = os.path.join(account.worker_dir, "worker_error.log")
+                with open(error_file, 'w', encoding='utf-8') as f:
+                    f.write(f"Worker {worker_id} - Error during output save\n")
+                    f.write(f"Email: {account.email}\n")
+                    f.write(f"Status: {account.status}\n")
+                    f.write(f"Save Error: {str(e)}\n")
+                logger.info(f"[DETAIL] Worker {worker_id}: Created error log file")
+            except Exception as err_save_error:
+                logger.error(f"[DETAIL] Worker {worker_id}: Could not even save error file: {err_save_error}")
 
     def create_unicode_safe_auto_py(self, worker_dir):
         """Create a Unicode-safe version of auto.py for the worker"""
         try:
-            # Read the original auto.py file
+            logger.info(f"[DETAIL] Reading original auto.py for Unicode-safe conversion in {worker_dir}")
             with open("auto.py", "r", encoding="utf-8") as f:
                 content = f.read()
-            
+            logger.info(f"[DETAIL] Read {len(content)} characters from auto.py")
             # Replace ALL Unicode characters found in auto.py with ASCII equivalents
             emoji_replacements = {
                 # Core emojis used throughout auto.py
@@ -1102,11 +1437,16 @@ STDERR OUTPUT:
                 "⇐": "<=", "⇒": "=>", "⇔": "<=>",
             }
             
-            # Apply emoji replacements
+            replaced_count = 0
             for emoji, replacement in emoji_replacements.items():
+                if emoji in content:
+                    replaced_count += content.count(emoji)
+                    logger.info(f"[DETAIL] Replacing '{emoji}' with '{replacement}' ({content.count(emoji)} times)")
                 content = content.replace(emoji, replacement)
+            logger.info(f"[DETAIL] Total emoji/unicode replacements: {replaced_count}")
             
             # Create the CSV-compatible version of get_user_credentials_and_config
+            logger.info("[DETAIL] Preparing CSV-compatible get_user_credentials_and_config function")
             csv_reader_code = '''def get_user_credentials_and_config():
     """Read credentials from gmail_accounts.csv for multi-threaded batch processing"""
     print("\\n" + "="*50)
@@ -1352,9 +1692,11 @@ def handle_2fa_popup(driver):
 '''
             
             # Find and replace the get_user_credentials_and_config function more carefully
+            logger.info("[DETAIL] Attempting to replace get_user_credentials_and_config function")
             import re
             
             # Also need to update handle_2fa_and_verification function to include popup handling
+            logger.info("[DETAIL] Attempting to replace handle_2fa_and_verification function")
             handle_2fa_code = '''def handle_2fa_and_verification(driver):
     """Handle 2FA and verification prompts during login with extended waiting for manual input"""
     print("[LOCK] Checking for 2FA/verification prompts...")
@@ -1529,45 +1871,52 @@ def handle_2fa_popup(driver):
                 logger.warning("handle_2fa_and_verification function not found in auto.py")
             
             # Ensure required imports are present at the top
+            import_added = False
             if 'import csv' not in content:
                 content = 'import csv\n' + content
+                logger.info("[DETAIL] Added 'import csv' to auto.py")
+                import_added = True
             if 'import os' not in content:
                 content = 'import os\n' + content
+                logger.info("[DETAIL] Added 'import os' to auto.py")
+                import_added = True
+            if not import_added:
+                logger.info("[DETAIL] All required imports already present in auto.py")
             
             # Clean up any problematic constructs that could cause syntax errors
+            logger.info("[DETAIL] Cleaning up problematic constructs for syntax safety")
             lines = content.split('\n')
             cleaned_lines = []
-            
             for i, line in enumerate(lines):
                 # Skip empty import lines that could cause issues
                 if line.strip() == 'csv' or line.strip() == 'os':
+                    logger.info(f"[DETAIL] Skipping empty import line at {i}: {line}")
                     continue
-                
                 # Fix any hanging for loops or other incomplete statements
                 stripped = line.strip()
                 if stripped.startswith('for ') and stripped.endswith(':'):
-                    # Check if next line is properly indented
                     if i + 1 < len(lines):
                         next_line = lines[i + 1] if i + 1 < len(lines) else ""
                         if not next_line.strip() or not next_line.startswith('    '):
-                            # Add a pass statement to complete the for loop
+                            logger.info(f"[DETAIL] Adding pass statement for incomplete for-loop at line {i}")
                             cleaned_lines.append(line)
                             cleaned_lines.append('    pass  # Placeholder for incomplete loop')
                             continue
-                
                 cleaned_lines.append(line)
-            
             content = '\n'.join(cleaned_lines)
             
             # Disable user input prompts that could hang the subprocess
+            logger.info("[DETAIL] Disabling user input prompts for subprocess automation")
             content = content.replace('input("Press Enter when you want to close the browser, or close it manually.")', 
                                     'print("[INFO] Automation completed - browser will close automatically in 10 seconds")\ntime.sleep(10)')
             content = content.replace('input("Press Enter to continue...")', 'print("[INFO] Continuing automatically...")\ntime.sleep(2)')
             content = content.replace('input("Press Enter to exit...")', 'print("[INFO] Exiting automatically...")')
             content = content.replace('input("', 'print("# AUTOMATED INPUT: ')
             content = content.replace('getpass.getpass("', 'print("# AUTOMATED GETPASS: ')
+            logger.info("[DETAIL] User input prompts replaced")
             
             # Add timeout protection and better subprocess handling
+            logger.info("[DETAIL] Adding timeout protection and subprocess settings")
             timeout_protection = '''
 # Subprocess timeout protection for multi-threaded automation
 import signal
@@ -1597,32 +1946,28 @@ print("[INFO] Total automation timeout: 60 minutes")
             # Add timeout protection at the very beginning of the file, after imports
             lines = content.split('\n')
             insert_index = 0
-            
-            # Find the best place to insert - after all imports but before main code
             for i, line in enumerate(lines):
                 stripped = line.strip()
                 if stripped.startswith('import ') or stripped.startswith('from '):
                     insert_index = i + 1
                 elif stripped and not stripped.startswith('#') and not stripped.startswith('import') and not stripped.startswith('from'):
                     break
-            
-            # Insert timeout protection at the found location
+            logger.info(f"[DETAIL] Inserting timeout protection at line {insert_index}")
             lines.insert(insert_index, timeout_protection)
             content = '\n'.join(lines)
             
             # Write the modified auto.py to worker directory with comprehensive validation
             safe_auto_py = os.path.join(worker_dir, "auto.py")
-            
-            # Try different encoding methods for maximum compatibility
             encodings_to_try = ['utf-8', 'utf-8-sig', 'ascii', 'cp1252', 'latin1']
-            
+            logger.info(f"[DETAIL] Attempting to write auto.py to {safe_auto_py} with multiple encodings")
             for encoding in encodings_to_try:
                 try:
                     with open(safe_auto_py, "w", encoding=encoding, errors='replace') as f:
                         f.write(content)
-                    logger.info(f"Successfully created auto.py with {encoding} encoding")
+                    logger.info(f"[DETAIL] Successfully created auto.py with {encoding} encoding")
                     break
                 except UnicodeEncodeError as e:
+                    logger.warning(f"[DETAIL] UnicodeEncodeError with encoding {encoding}: {e}")
                     if encoding == encodings_to_try[-1]:  # Last encoding attempt
                         logger.error(f"Failed to encode with all attempted encodings: {e}")
                         return False
@@ -1630,15 +1975,14 @@ print("[INFO] Total automation timeout: 60 minutes")
             
             # Comprehensive validation of the created file
             try:
-                # Test if the file can be read
+                logger.info(f"[DETAIL] Validating created auto.py file at {safe_auto_py}")
                 with open(safe_auto_py, "r", encoding="utf-8", errors='replace') as f:
                     test_content = f.read()
-                
+                logger.info(f"[DETAIL] Read {len(test_content)} characters from written auto.py")
                 # Basic sanity checks
                 if len(test_content) < 1000:
                     logger.error("Created auto.py file appears to be too small")
                     return False
-                
                 # Check for Python syntax by trying to compile
                 try:
                     import ast
@@ -1647,16 +1991,14 @@ print("[INFO] Total automation timeout: 60 minutes")
                 except SyntaxError as syntax_error:
                     logger.error(f"Syntax error in created auto.py: {syntax_error}")
                     logger.error(f"Error at line {syntax_error.lineno}: {syntax_error.text}")
-                    
                     # Try to fix common syntax issues
                     lines = test_content.split('\n')
                     if syntax_error.lineno and syntax_error.lineno <= len(lines):
                         error_line = lines[syntax_error.lineno - 1]
                         logger.info(f"Attempting to fix syntax error in line: {error_line}")
-                        
                         # Common fixes
                         if "IndentationError" in str(syntax_error):
-                            # Fix indentation issues by ensuring proper spacing
+                            logger.info("[DETAIL] Attempting to fix indentation error")
                             fixed_lines = []
                             for line in lines:
                                 if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
@@ -1666,13 +2008,9 @@ print("[INFO] Total automation timeout: 60 minutes")
                                         fixed_lines.append(line)
                                 else:
                                     fixed_lines.append(line)
-                            
-                            # Rewrite with fixed content
                             fixed_content = '\n'.join(fixed_lines)
                             with open(safe_auto_py, "w", encoding="utf-8", errors='replace') as f:
                                 f.write(fixed_content)
-                            
-                            # Test again
                             try:
                                 ast.parse(fixed_content)
                                 logger.info("Successfully fixed syntax error")
@@ -1680,17 +2018,121 @@ print("[INFO] Total automation timeout: 60 minutes")
                                 logger.error("Could not fix syntax error automatically")
                                 return False
                         else:
+                            logger.error("[DETAIL] Unhandled syntax error type, aborting")
                             return False
-                
                 return True
-                
             except Exception as e:
                 logger.error(f"Failed to validate created auto.py file: {e}")
+                return False
                 return False
             
         except Exception as e:
             logger.error(f"Failed to create Unicode-safe auto.py: {e}")
             return False
+
+def search_for_downloaded_credentials():
+    """Manual search function to help find downloaded JSON credentials"""
+    import glob
+    print("\n" + "="*60)
+    print("🔍 MANUAL CREDENTIAL SEARCH")
+    print("="*60)
+    
+    # Common locations where JSON files might be downloaded
+    search_locations = [
+        # Current directory and subdirectories
+        os.path.join(os.getcwd(), "*.json"),
+        os.path.join(os.getcwd(), "**", "*.json"),
+        
+        # Worker directories
+        os.path.join(os.getcwd(), "worker_*", "*.json"),
+        os.path.join(os.getcwd(), "worker_*", "downloads", "*.json"),
+        os.path.join(os.getcwd(), "worker_*", "**", "*.json"),
+        
+        # Advanced worker directories
+        os.path.join(os.getcwd(), "advanced_worker_*", "*.json"),
+        os.path.join(os.getcwd(), "advanced_worker_*", "downloads", "*.json"),
+        os.path.join(os.getcwd(), "advanced_worker_*", "**", "*.json"),
+        
+        # Common download locations
+        os.path.join(os.path.expanduser("~"), "Downloads", "*.json"),
+        os.path.join("C:\\Users", os.getenv("USERNAME", ""), "Downloads", "*.json") if os.name == 'nt' else "",
+        os.path.join("C:\\Users", os.getenv("USERNAME", ""), "Desktop", "*.json") if os.name == 'nt' else "",
+        
+        # Chrome default download location
+        os.path.join(os.path.expanduser("~"), "Downloads", "client_secret_*.json"),
+    ]
+    
+    # Remove empty patterns
+    search_locations = [loc for loc in search_locations if loc]
+    
+    print(f"Searching {len(search_locations)} locations...")
+    
+    found_files = []
+    credential_files = []
+    
+    for i, location in enumerate(search_locations, 1):
+        try:
+            files = glob.glob(location, recursive=True)
+            if files:
+                print(f"📁 Location {i}: {location} - Found {len(files)} JSON files")
+                found_files.extend(files)
+            else:
+                print(f"📁 Location {i}: {location} - No files")
+        except Exception as e:
+            print(f"❌ Location {i}: {location} - Error: {e}")
+    
+    if found_files:
+        print(f"\n📄 Found {len(found_files)} JSON files total:")
+        
+        # Check which ones are credential files
+        for json_file in found_files:
+            try:
+                if os.path.exists(json_file):
+                    file_size = os.path.getsize(json_file)
+                    file_time = datetime.fromtimestamp(os.path.getctime(json_file))
+                    
+                    # Check if it's a credential file
+                    is_credential = False
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            content = f.read(500)
+                            if any(keyword in content.lower() for keyword in [
+                                'client_id', 'client_secret', 'auth_uri', 'token_uri', 
+                                'googleapis.com', 'oauth2'
+                            ]):
+                                is_credential = True
+                                credential_files.append(json_file)
+                    except:
+                        pass
+                    
+                    status = "🔑 CREDENTIAL FILE" if is_credential else "📄 JSON file"
+                    print(f"\n{status}")
+                    print(f"   📄 Name: {os.path.basename(json_file)}")
+                    print(f"   📁 Location: {json_file}")
+                    print(f"   📏 Size: {file_size} bytes")
+                    print(f"   ⏰ Created: {file_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+            except Exception as e:
+                print(f"❌ Error checking {json_file}: {e}")
+        
+        if credential_files:
+            print(f"\n🎉 FOUND {len(credential_files)} CREDENTIAL FILES!")
+            print("\nTo use these files:")
+            print("1. Copy the credential file to your project directory")
+            print("2. Rename it to 'credentials.json' if needed")
+            print("3. Update your code to use the correct path")
+        else:
+            print(f"\n⚠️ Found {len(found_files)} JSON files but none appear to be Google credentials")
+            print("Google credential files should contain: client_id, client_secret, auth_uri, etc.")
+    else:
+        print("\n❌ No JSON files found in any searched locations")
+        print("\nTips:")
+        print("1. Check if the download actually completed")
+        print("2. Look in your browser's download folder")
+        print("3. Check if the file was moved to a different location")
+        print("4. Make sure the automation reached the credential download step")
+    
+    print("\n" + "="*60)
 
 def main():
     """Main function to run the multi-threaded automation with enhanced compatibility"""
@@ -1700,6 +2142,18 @@ def main():
     print("This script runs multiple instances of auto.py in parallel using subprocesses")
     print("for complete isolation and maximum compatibility.")
     print()
+    
+    # Add option to search for existing credentials
+    print("Options:")
+    print("1. Run automation")
+    print("2. Search for downloaded credentials")
+    print()
+    
+    choice = input("Enter your choice (1 or 2, default=1): ").strip()
+    if choice == "2":
+        search_for_downloaded_credentials()
+        input("Press Enter to exit...")
+        return
     
     # Enhanced pre-flight checks
     print("Performing pre-flight checks...")
