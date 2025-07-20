@@ -3,7 +3,7 @@
 Test the instant credential collection with real automation
 """
 
-from multi_threaded_subprocess import SubprocessMultiThreadedAutomation#!/usr/bin/env python3
+#from multi_threaded_subprocess import SubprocessMultiThreadedAutomation#!/usr/bin/env python3
 """
 Multi-Threaded Gmail Automation - SUBPROCESS APPROACH
 Runs multiple instances of auto.py in parallel using subprocesses
@@ -1227,7 +1227,21 @@ STDERR OUTPUT:
             logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Starting instant credential collection for {account.email}")
             collected_count = 0
             
-            # Get list of already collected files to avoid duplicates
+            # Track source files that have already been collected to avoid duplicates
+            # Create a tracking file for this worker to remember what's been collected
+            tracking_file = os.path.join(self.final_credentials_dir, f"worker_{worker_id}_collected_sources.txt")
+            already_collected_sources = set()
+            
+            # Load previously collected source file paths
+            if os.path.exists(tracking_file):
+                try:
+                    with open(tracking_file, 'r', encoding='utf-8') as f:
+                        already_collected_sources = set(line.strip() for line in f.readlines() if line.strip())
+                    logger.debug(f"[WORKER-TASK] Worker {worker_id}: Loaded {len(already_collected_sources)} previously collected source paths")
+                except Exception as e:
+                    logger.warning(f"[WORKER-TASK] Worker {worker_id}: Could not load tracking file: {e}")
+            
+            # Get list of already collected files to avoid duplicates (fallback method)
             already_collected = set()
             if os.path.exists(self.final_credentials_dir):
                 for existing_file in os.listdir(self.final_credentials_dir):
@@ -1278,10 +1292,11 @@ STDERR OUTPUT:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         new_filename = f"worker_{worker_id}_{safe_email}_{base_name}_{timestamp}{ext}"
                         
-                        # Check if we already collected this file (avoid duplicates)
-                        if any(new_filename.startswith(existing.split('_')[0] + '_' + existing.split('_')[1] + '_' + existing.split('_')[2] + '_' + base_name) 
-                              for existing in already_collected):
-                            logger.debug(f"[WORKER-TASK] Worker {worker_id}: Task - Skipping duplicate: {original_name}")
+                        # Check if this source file has already been collected
+                        source_file_path = os.path.abspath(cred_file)
+                        
+                        if source_file_path in already_collected_sources:
+                            logger.debug(f"[WORKER-TASK] Worker {worker_id}: Task - Skipping already collected source file: {original_name}")
                             continue
                         
                         destination = os.path.join(self.final_credentials_dir, new_filename)
@@ -1293,8 +1308,16 @@ STDERR OUTPUT:
                         logger.info(f"[WORKER-TASK] Worker {worker_id}: Task COMPLETED - Copied {original_name} -> {new_filename}")
                         print(f"🎉 [INSTANT COLLECTION] Worker {worker_id}: {account.email} -> {new_filename}")
                         
-                        # Add to our tracking set
+                        # Add to our tracking sets
                         already_collected.add(new_filename)
+                        already_collected_sources.add(source_file_path)
+                        
+                        # Save the source file path to tracking file
+                        try:
+                            with open(tracking_file, 'a', encoding='utf-8') as f:
+                                f.write(f"{source_file_path}\n")
+                        except Exception as track_error:
+                            logger.warning(f"[WORKER-TASK] Worker {worker_id}: Could not update tracking file: {track_error}")
                         
                     except Exception as copy_error:
                         logger.error(f"[WORKER-TASK] Worker {worker_id}: Task FAILED - Copy {cred_file}: {copy_error}")
@@ -1327,6 +1350,19 @@ STDERR OUTPUT:
                 if not hasattr(account, '_no_creds_logged'):  # Only print this once per worker
                     print(f"⚠️ [INSTANT COLLECTION] Worker {worker_id}: No credentials found yet for {account.email}")
                     account._no_creds_logged = True
+            
+            # Clean up tracking file if it gets too large (keep only the last 100 entries)
+            try:
+                if os.path.exists(tracking_file):
+                    with open(tracking_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    if len(lines) > 100:  # Keep only last 100 entries
+                        with open(tracking_file, 'w', encoding='utf-8') as f:
+                            f.writelines(lines[-100:])
+                        logger.debug(f"[WORKER-TASK] Worker {worker_id}: Cleaned up tracking file, kept last 100 entries")
+            except Exception as cleanup_error:
+                logger.warning(f"[WORKER-TASK] Worker {worker_id}: Could not cleanup tracking file: {cleanup_error}")
             
             return collected_count
             
