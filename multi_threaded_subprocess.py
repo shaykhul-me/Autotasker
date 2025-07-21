@@ -114,14 +114,11 @@ class SubprocessMultiThreadedAutomation:
                 
                 for row_num, row in enumerate(reader, 1):
                     if 'email' in row and 'password' in row:
-                        # Create worker-specific directory
-                        worker_dir = os.path.join(self.base_dir, f"worker_{row_num}")
-                        os.makedirs(worker_dir, exist_ok=True)
-                        
+                        # Don't create worker directory here - will be assigned dynamically during execution
                         account = EmailAccount(
                             email=row['email'].strip(),
                             password=row['password'].strip(),
-                            worker_dir=worker_dir
+                            worker_dir=None  # Will be set during execution with proper worker ID
                         )
                         self.accounts.append(account)
                         logger.info(f"Loaded account: {account.email}")
@@ -359,6 +356,75 @@ psutil>=5.9.0
             logger.error(f"Worker {worker_id}: Failed to setup environment: {e}")
             return False
     
+    def run_single_account_subprocess_with_queue(self, account, account_index):
+        """
+        Run automation for a single account with proper worker ID management for queuing
+        """
+        # Use a simple counter-based approach for worker ID assignment
+        # This ensures we rotate through worker IDs 1 to max_workers consistently
+        with threading.Lock():
+            if not hasattr(self, '_worker_counter'):
+                self._worker_counter = 0
+            self._worker_counter += 1
+            worker_id = ((self._worker_counter - 1) % self.max_workers) + 1
+        
+        # Assign the proper worker directory based on the actual worker ID
+        worker_dir = os.path.join(self.base_dir, f"worker_{worker_id}")
+        
+        # CRITICAL: Clean up worker directory between accounts to prevent credential reuse
+        if os.path.exists(worker_dir):
+            logger.info(f"[WORKER-{worker_id}] Cleaning existing worker directory for fresh start")
+            try:
+                # Clean up downloads directory to prevent credential reuse
+                downloads_dir = os.path.join(worker_dir, "downloads")
+                if os.path.exists(downloads_dir):
+                    import shutil
+                    shutil.rmtree(downloads_dir)
+                    logger.info(f"[WORKER-{worker_id}] Removed existing downloads directory")
+                
+                # Clean up credentials directory
+                credentials_dir = os.path.join(worker_dir, "credentials")
+                if os.path.exists(credentials_dir):
+                    shutil.rmtree(credentials_dir)
+                    logger.info(f"[WORKER-{worker_id}] Removed existing credentials directory")
+                
+                # Clean up Chrome profile instances (but be more careful)
+                try:
+                    for item in os.listdir(worker_dir):
+                        if item.startswith("chrome_profile_instance_"):
+                            item_path = os.path.join(worker_dir, item)
+                            if os.path.isdir(item_path):
+                                shutil.rmtree(item_path)
+                                logger.info(f"[WORKER-{worker_id}] Removed Chrome profile: {item}")
+                except Exception as chrome_cleanup_error:
+                    logger.warning(f"[WORKER-{worker_id}] Chrome profile cleanup error (continuing): {chrome_cleanup_error}")
+                            
+            except Exception as cleanup_error:
+                logger.warning(f"[WORKER-{worker_id}] Worker directory cleanup error (continuing): {cleanup_error}")
+        
+        # Ensure worker directory exists
+        os.makedirs(worker_dir, exist_ok=True)
+        
+        # Verify worker directory is accessible
+        if not os.path.exists(worker_dir) or not os.access(worker_dir, os.W_OK):
+            logger.error(f"[WORKER-{worker_id}] Worker directory not accessible: {worker_dir}")
+            raise Exception(f"Worker directory not accessible: {worker_dir}")
+        account.worker_dir = worker_dir  # Update the account with the correct worker directory
+        
+        thread_ident = threading.current_thread().ident
+        logger.info(f"[WORKER-{worker_id}] Starting account {account.email} (account {account_index + 1}/{len(self.accounts)}) on thread {thread_ident}")
+        logger.info(f"[WORKER-{worker_id}] Worker ID assignment: counter={self._worker_counter}, max_workers={self.max_workers}, assigned_id={worker_id}")
+        logger.info(f"[WORKER-{worker_id}] Assigned worker directory: {worker_dir}")
+        
+        # Add a small delay to prevent rapid reuse issues when workers complete very quickly
+        import time
+        time.sleep(2)  # 2-second delay to ensure proper cleanup
+        
+        # Ensure Chrome process cleanup before starting
+        self.cleanup_chrome_processes(worker_id)
+        
+        return self.run_single_account_subprocess(account, worker_id)
+    
     def run_single_account_subprocess(self, account: EmailAccount, worker_id: int):
         """Run automation for a single account using subprocess with advanced parallel processing"""
         logger.info(f"[WORKER-TASK] Worker {worker_id}: STARTING automation task for {account.email}")
@@ -523,6 +589,10 @@ psutil>=5.9.0
                     logger.info(f"[WORKER-TASK] Worker {worker_id}: Task - Starting process monitoring")
                     logger.info(f"[DETAIL] Worker {worker_id}: Starting advanced process monitoring...")
                     
+                    # Initialize stdout and stderr variables to prevent UnboundLocalError
+                    stdout = ""
+                    stderr = ""
+                    
                     # Extended timeout with intelligent monitoring for manual interaction
                     timeout_seconds = 3600  # 60 minutes base timeout (increased for manual steps)
                     check_interval = 30  # Check every 30 seconds
@@ -604,27 +674,36 @@ psutil>=5.9.0
                             stdout = stdout or ""
                             stderr = stderr or ""
                     else:
-                        # Process still running after timeout
+                        # Process still running after monitoring loop ended (health check failure or other issues)
+                        logger.warning(f"[DETAIL] Worker {worker_id}: Process still running after monitoring loop - setting default output")
+                        stdout = stdout or ""
+                        stderr = stderr or f"Process ended monitoring loop without normal completion (health check failure or timeout)"
+                        
+                        # Process still running after timeout - attempt graceful shutdown
                         logger.warning(f"[DETAIL] Worker {worker_id}: Process timeout after {timeout_seconds}s monitoring - attempting graceful shutdown")
                         try:
                             # Try graceful termination first
                             logger.info(f"[DETAIL] Worker {worker_id}: Sending SIGTERM for graceful termination")
                             process.terminate()
-                            stdout, stderr = process.communicate(timeout=30)
+                            final_stdout, final_stderr = process.communicate(timeout=30)
+                            stdout += (final_stdout or "")
+                            stderr += (final_stderr or "")
                             logger.info(f"[DETAIL] Worker {worker_id}: Graceful termination successful")
                         except subprocess.TimeoutExpired:
                             # Force kill if graceful termination fails
                             logger.error(f"[DETAIL] Worker {worker_id}: Graceful termination failed after 30s, force killing process")
                             process.kill()
                             try:
-                                stdout, stderr = process.communicate(timeout=10)
+                                final_stdout, final_stderr = process.communicate(timeout=10)
+                                stdout += (final_stdout or "")
+                                stderr += (final_stderr or "")
                                 logger.warning(f"[DETAIL] Worker {worker_id}: Force kill completed")
                             except Exception as kill_error:
                                 logger.error(f"[DETAIL] Worker {worker_id}: Error during force kill: {kill_error}")
-                                stdout, stderr = "", "Process was force killed due to timeout"
+                                stderr += f"Kill error: {kill_error}"
                         except Exception as term_error:
                             logger.error(f"[DETAIL] Worker {worker_id}: Error during termination: {term_error}")
-                            stdout, stderr = "", f"Termination error: {term_error}"
+                            stderr += f"Termination error: {term_error}"
                         
                         raise Exception(f"Process monitoring timeout after {timeout_seconds/60:.1f} minutes")
                     
@@ -1657,7 +1736,7 @@ STDERR OUTPUT:
                         
                 print(f"\n❌ No credentials found for {account.email}")
                 print(f"🔍 Searched locations:")
-                for dir_path in set(checked_dirs)[:5]:  # Show first 5 locations
+                for dir_path in list(set(checked_dirs))[:5]:  # Show first 5 locations
                     print(f"   📁 {dir_path}")
             
         except Exception as e:
@@ -1700,7 +1779,7 @@ STDERR OUTPUT:
             logger.error(f"[WORKER-TASK] Health monitoring error: {e}")
     
     def run_automation(self):
-        """Run automation for all accounts using thread pool"""
+        """Run automation for all accounts using thread pool with proper queuing"""
         if not self.accounts:
             logger.error("No accounts loaded!")
             return False
@@ -1708,18 +1787,19 @@ STDERR OUTPUT:
         logger.info(f"Starting multi-threaded automation for {len(self.accounts)} accounts")
         logger.info(f"Using {self.max_workers} concurrent workers")
         logger.info("Each worker will run auto.py as an isolated subprocess")
+        logger.info(f"Worker allocation: {len(self.accounts)} accounts will be processed by {self.max_workers} workers in batches")
         
         start_time = datetime.now()
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Submit all tasks with improved Chrome process isolation
+                # Submit all tasks - ThreadPoolExecutor will queue them automatically
                 future_to_account = {}
-                for worker_id, account in enumerate(self.accounts, 1):
-                    logger.info(f"[WORKER-TASK] Preparing worker {worker_id} for account {account.email}")
-                    # Ensure Chrome process cleanup before starting new worker
-                    self.cleanup_chrome_processes(worker_id)
-                    future = executor.submit(self.run_single_account_subprocess, account, worker_id)
+                for account_index, account in enumerate(self.accounts):
+                    # Worker ID will be assigned dynamically by the thread pool
+                    # We'll calculate it in the worker function itself
+                    logger.info(f"[WORKER-TASK] Submitting task for account {account.email} (account {account_index + 1}/{len(self.accounts)})")
+                    future = executor.submit(self.run_single_account_subprocess_with_queue, account, account_index)
                     future_to_account[future] = account
                 
                 # Monitor progress with detailed worker task actions and health checks
