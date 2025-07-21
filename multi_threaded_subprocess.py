@@ -22,10 +22,16 @@ import uuid
 import glob
 import json
 import re
+import queue
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
 import logging
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 # Configure logging without unicode characters
 logging.basicConfig(
@@ -84,11 +90,165 @@ class ThreadSafeCounter:
     def get_value(self):
         with self._lock:
             return self._value
+    
+    def reset(self):
+        with self._lock:
+            self._value = 0
+
+class AdvancedWorkerPool:
+    """Advanced worker pool with dynamic account queue and intelligent rotation"""
+    def __init__(self, max_workers=2):
+        self.max_workers = max_workers
+        self.worker_queue = queue.Queue()
+        self.account_queue = queue.Queue()  # Queue for pending accounts
+        self.active_workers = {}
+        self.worker_stats = {}
+        self.worker_lock = threading.Lock()
+        self.assignment_counter = 0
+        self.completed_accounts = []
+        self.failed_accounts = []
+        
+        # Initialize worker pool
+        for worker_id in range(1, max_workers + 1):
+            self.worker_queue.put(worker_id)
+            self.worker_stats[worker_id] = {
+                'total_accounts': 0,
+                'completed_accounts': 0,
+                'failed_accounts': 0,
+                'total_time': 0,
+                'last_used': None,
+                'current_account': None,
+                'is_active': False,
+                'start_time': None
+            }
+        
+        logger.info(f"[WORKER-POOL] Initialized dynamic worker pool with {max_workers} workers")
+        logger.info(f"[WORKER-POOL] Worker queue initialized: {list(range(1, max_workers + 1))}")
+        logger.info(f"[WORKER-POOL] Dynamic account queue ready for continuous processing")
+    
+    def add_accounts_to_queue(self, accounts):
+        """Add all accounts to the dynamic processing queue"""
+        with self.worker_lock:
+            for i, account in enumerate(accounts):
+                self.account_queue.put((account, i))
+                logger.info(f"[WORKER-POOL] Added {account.email} to dynamic queue (position {i+1})")
+            
+            total_queued = self.account_queue.qsize()
+            logger.info(f"[WORKER-POOL] 🎯 Dynamic queue initialized with {total_queued} accounts")
+            logger.info(f"[WORKER-POOL] 🔄 Workers will continuously process accounts as they become available")
+    
+    def get_next_account(self):
+        """Get the next account from the queue for processing"""
+        try:
+            if not self.account_queue.empty():
+                account, account_index = self.account_queue.get(timeout=1)
+                logger.info(f"[WORKER-POOL] 📋 Retrieved {account.email} from dynamic queue (remaining: {self.account_queue.qsize()})")
+                return account, account_index
+            else:
+                logger.info(f"[WORKER-POOL] 🏁 Dynamic queue is empty - no more accounts to process")
+                return None, None
+        except queue.Empty:
+            logger.info(f"[WORKER-POOL] 🏁 Queue timeout - no more accounts available")
+            return None, None
+    
+    def acquire_worker(self, account_email):
+        """Acquire the next available worker with immediate rotation"""
+        with self.worker_lock:
+            if self.worker_queue.empty():
+                # All workers busy - this shouldn't happen in dynamic mode
+                logger.warning(f"[WORKER-POOL] ⚠️ All workers busy for {account_email} - dynamic queue issue")
+                # Use round-robin assignment as emergency fallback
+                self.assignment_counter += 1
+                worker_id = ((self.assignment_counter - 1) % self.max_workers) + 1
+                logger.info(f"[WORKER-POOL] 🔄 Emergency fallback: Worker {worker_id} for {account_email}")
+            else:
+                # Get next available worker immediately
+                worker_id = self.worker_queue.get()
+                logger.info(f"[WORKER-POOL] ⚡ Instant worker acquisition: Worker {worker_id} for {account_email}")
+            
+            # Update worker status
+            self.active_workers[worker_id] = account_email
+            self.worker_stats[worker_id]['current_account'] = account_email
+            self.worker_stats[worker_id]['is_active'] = True
+            self.worker_stats[worker_id]['total_accounts'] += 1
+            self.worker_stats[worker_id]['last_used'] = datetime.now()
+            self.worker_stats[worker_id]['start_time'] = datetime.now()
+            
+            active_count = len(self.active_workers)
+            queue_remaining = self.account_queue.qsize()
+            
+            logger.info(f"[WORKER-POOL] 📊 Worker {worker_id} activated: {active_count}/{self.max_workers} workers active")
+            logger.info(f"[WORKER-POOL] 📈 Accounts remaining in queue: {queue_remaining}")
+            
+            return worker_id
+    
+    def release_worker_immediately(self, worker_id, account_email, success=True, execution_time=0):
+        """Immediately release worker and start next account if available"""
+        with self.worker_lock:
+            # Update statistics first
+            if worker_id in self.active_workers:
+                del self.active_workers[worker_id]
+            
+            if success:
+                self.worker_stats[worker_id]['completed_accounts'] += 1
+                self.completed_accounts.append((account_email, worker_id, execution_time))
+            else:
+                self.worker_stats[worker_id]['failed_accounts'] += 1
+                self.failed_accounts.append((account_email, worker_id, execution_time))
+            
+            self.worker_stats[worker_id]['total_time'] += execution_time
+            self.worker_stats[worker_id]['current_account'] = None
+            self.worker_stats[worker_id]['is_active'] = False
+            self.worker_stats[worker_id]['start_time'] = None
+            
+            # Immediately return worker to queue for next account
+            self.worker_queue.put(worker_id)
+            
+            active_count = len(self.active_workers)
+            queue_remaining = self.account_queue.qsize()
+            success_rate = (self.worker_stats[worker_id]['completed_accounts'] / 
+                          max(1, self.worker_stats[worker_id]['total_accounts'])) * 100
+            
+            logger.info(f"[WORKER-POOL] ⚡ Worker {worker_id} immediately released after {execution_time:.1f}s")
+            logger.info(f"[WORKER-POOL] 📊 Status: {active_count}/{self.max_workers} active, "
+                       f"{queue_remaining} accounts queued")
+            logger.info(f"[WORKER-POOL] 📈 Worker {worker_id} stats: "
+                       f"{self.worker_stats[worker_id]['completed_accounts']}✅/"
+                       f"{self.worker_stats[worker_id]['failed_accounts']}❌ "
+                       f"({success_rate:.1f}% success)")
+            
+            return queue_remaining > 0  # Return True if more accounts are waiting
+    
+    def has_pending_accounts(self):
+        """Check if there are still accounts waiting to be processed"""
+        return not self.account_queue.empty()
+    
+    def get_queue_status(self):
+        """Get current queue status with enhanced information"""
+        with self.worker_lock:
+            return {
+                'available_workers': self.worker_queue.qsize(),
+                'active_workers': len(self.active_workers),
+                'total_capacity': self.max_workers,
+                'pending_accounts': self.account_queue.qsize(),
+                'completed_accounts': len(self.completed_accounts),
+                'failed_accounts': len(self.failed_accounts)
+            }
+    
+    def get_active_workers(self):
+        """Get list of currently active workers"""
+        with self.worker_lock:
+            return dict(self.active_workers)
+    
+    def get_worker_stats(self):
+        """Get comprehensive worker statistics"""
+        with self.worker_lock:
+            return dict(self.worker_stats)
 
 class SubprocessMultiThreadedAutomation:
-    """Multi-threaded automation using subprocess approach"""
+    """Multi-threaded automation using subprocess approach with advanced worker pool management"""
     
-    def __init__(self, max_workers=3, show_terminals=False):
+    def __init__(self, max_workers=2, show_terminals=False):
         self.max_workers = max_workers
         self.show_terminals = show_terminals  # Control terminal visibility
         self.accounts = []
@@ -96,11 +256,18 @@ class SubprocessMultiThreadedAutomation:
         self.failed_counter = ThreadSafeCounter()
         self.base_dir = os.getcwd()
         
+        # Initialize advanced worker pool
+        self.worker_pool = AdvancedWorkerPool(max_workers)
+        
         # Create centralized credentials collection folder
         self.final_credentials_dir = os.path.join(self.base_dir, "final_credentials_collection")
         os.makedirs(self.final_credentials_dir, exist_ok=True)
-        logger.info(f"Created final credentials collection directory: {self.final_credentials_dir}")
-        logger.info(f"Terminal visibility: {'Enabled' if show_terminals else 'Hidden (cleaner experience)'}")
+        
+        logger.info(f"🚀 ADVANCED MULTI-THREADED AUTOMATION INITIALIZED")
+        logger.info(f"📁 Final credentials directory: {self.final_credentials_dir}")
+        logger.info(f"👁️  Terminal visibility: {'Enabled' if show_terminals else 'Hidden (cleaner experience)'}")
+        logger.info(f"⚙️  Worker pool: {max_workers} workers with intelligent queue management")
+        logger.info(f"🔄 Worker rotation: Advanced load balancing with statistics tracking")
     
     def load_accounts_from_csv(self, csv_file="gmail_accounts.csv"):
         """Load email accounts from CSV file"""
@@ -358,72 +525,104 @@ psutil>=5.9.0
     
     def run_single_account_subprocess_with_queue(self, account, account_index):
         """
-        Run automation for a single account with proper worker ID management for queuing
+        Run automation for a single account with immediate worker rotation for next account
         """
-        # Use a simple counter-based approach for worker ID assignment
-        # This ensures we rotate through worker IDs 1 to max_workers consistently
-        with threading.Lock():
-            if not hasattr(self, '_worker_counter'):
-                self._worker_counter = 0
-            self._worker_counter += 1
-            worker_id = ((self._worker_counter - 1) % self.max_workers) + 1
+        # Acquire worker from advanced pool with immediate assignment
+        worker_id = self.worker_pool.acquire_worker(account.email)
         
-        # Assign the proper worker directory based on the actual worker ID
+        # Assign the proper worker directory based on the assigned worker ID
         worker_dir = os.path.join(self.base_dir, f"worker_{worker_id}")
         
-        # CRITICAL: Clean up worker directory between accounts to prevent credential reuse
+        # Enhanced worker directory cleanup with better isolation
         if os.path.exists(worker_dir):
-            logger.info(f"[WORKER-{worker_id}] Cleaning existing worker directory for fresh start")
+            logger.info(f"[WORKER-{worker_id}] 🧹 Performing immediate cleanup for account rotation")
             try:
-                # Clean up downloads directory to prevent credential reuse
-                downloads_dir = os.path.join(worker_dir, "downloads")
-                if os.path.exists(downloads_dir):
-                    import shutil
-                    shutil.rmtree(downloads_dir)
-                    logger.info(f"[WORKER-{worker_id}] Removed existing downloads directory")
+                # Critical cleanup directories
+                cleanup_dirs = ["downloads", "credentials", "chrome_profile", "temp"]
+                for cleanup_dir in cleanup_dirs:
+                    dir_path = os.path.join(worker_dir, cleanup_dir)
+                    if os.path.exists(dir_path):
+                        shutil.rmtree(dir_path)
+                        logger.info(f"[WORKER-{worker_id}] ✅ Cleaned {cleanup_dir} directory")
                 
-                # Clean up credentials directory
-                credentials_dir = os.path.join(worker_dir, "credentials")
-                if os.path.exists(credentials_dir):
-                    shutil.rmtree(credentials_dir)
-                    logger.info(f"[WORKER-{worker_id}] Removed existing credentials directory")
-                
-                # Clean up Chrome profile instances (but be more careful)
+                # Clean up Chrome profile instances with enhanced pattern matching
                 try:
                     for item in os.listdir(worker_dir):
-                        if item.startswith("chrome_profile_instance_"):
+                        if item.startswith(("chrome_profile_instance_", "chrome_data_", "chrome_user_data")):
                             item_path = os.path.join(worker_dir, item)
                             if os.path.isdir(item_path):
                                 shutil.rmtree(item_path)
-                                logger.info(f"[WORKER-{worker_id}] Removed Chrome profile: {item}")
+                                logger.info(f"[WORKER-{worker_id}] 🧹 Removed Chrome data: {item}")
                 except Exception as chrome_cleanup_error:
-                    logger.warning(f"[WORKER-{worker_id}] Chrome profile cleanup error (continuing): {chrome_cleanup_error}")
+                    logger.warning(f"[WORKER-{worker_id}] ⚠️  Chrome cleanup warning (continuing): {chrome_cleanup_error}")
                             
             except Exception as cleanup_error:
-                logger.warning(f"[WORKER-{worker_id}] Worker directory cleanup error (continuing): {cleanup_error}")
+                logger.warning(f"[WORKER-{worker_id}] ⚠️  Worker cleanup warning (continuing): {cleanup_error}")
         
-        # Ensure worker directory exists
+        # Ensure worker directory exists with proper permissions
         os.makedirs(worker_dir, exist_ok=True)
         
-        # Verify worker directory is accessible
+        # Enhanced worker directory validation
         if not os.path.exists(worker_dir) or not os.access(worker_dir, os.W_OK):
-            logger.error(f"[WORKER-{worker_id}] Worker directory not accessible: {worker_dir}")
+            logger.error(f"[WORKER-{worker_id}] ❌ Worker directory not accessible: {worker_dir}")
+            self.worker_pool.release_worker_immediately(worker_id, account.email, success=False)
             raise Exception(f"Worker directory not accessible: {worker_dir}")
+        
         account.worker_dir = worker_dir  # Update the account with the correct worker directory
         
+        # Enhanced logging with dynamic queue statistics
         thread_ident = threading.current_thread().ident
-        logger.info(f"[WORKER-{worker_id}] Starting account {account.email} (account {account_index + 1}/{len(self.accounts)}) on thread {thread_ident}")
-        logger.info(f"[WORKER-{worker_id}] Worker ID assignment: counter={self._worker_counter}, max_workers={self.max_workers}, assigned_id={worker_id}")
-        logger.info(f"[WORKER-{worker_id}] Assigned worker directory: {worker_dir}")
+        queue_status = self.worker_pool.get_queue_status()
         
-        # Add a small delay to prevent rapid reuse issues when workers complete very quickly
-        import time
-        time.sleep(2)  # 2-second delay to ensure proper cleanup
+        logger.info(f"[WORKER-{worker_id}] 🚀 STARTING immediate rotation automation for {account.email}")
+        logger.info(f"[WORKER-{worker_id}] 📊 Account {account_index + 1}/{len(self.accounts)} on thread {thread_ident}")
+        logger.info(f"[WORKER-{worker_id}] 🎯 Dynamic assignment: ID={worker_id} from rotation pool")
+        logger.info(f"[WORKER-{worker_id}] 📁 Worker directory: {worker_dir}")
+        logger.info(f"[WORKER-{worker_id}] 📈 Queue status: {queue_status['active_workers']}/{queue_status['total_capacity']} active, "
+                   f"{queue_status['pending_accounts']} pending, {queue_status['available_workers']} workers ready")
+        
+        # Minimal delay for immediate rotation
+        time.sleep(0.5)  # Very short delay for immediate processing
         
         # Ensure Chrome process cleanup before starting
         self.cleanup_chrome_processes(worker_id)
         
-        return self.run_single_account_subprocess(account, worker_id)
+        # Track execution time for immediate statistics
+        start_time = time.time()
+        
+        try:
+            # Run the actual automation
+            result = self.run_single_account_subprocess(account, worker_id)
+            execution_time = time.time() - start_time
+            
+            # Immediately release worker back to pool and check for next account
+            has_more_accounts = self.worker_pool.release_worker_immediately(
+                worker_id, account.email, success=result, execution_time=execution_time
+            )
+            
+            if has_more_accounts:
+                logger.info(f"[WORKER-{worker_id}] ⚡ IMMEDIATE ROTATION: Worker ready for next account")
+            else:
+                logger.info(f"[WORKER-{worker_id}] 🏁 QUEUE COMPLETE: No more accounts to process")
+            
+            logger.info(f"[WORKER-{worker_id}] ✅ COMPLETED automation for {account.email} in {execution_time:.1f}s")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            
+            # Immediately release worker even on failure for continuous processing
+            has_more_accounts = self.worker_pool.release_worker_immediately(
+                worker_id, account.email, success=False, execution_time=execution_time
+            )
+            
+            if has_more_accounts:
+                logger.info(f"[WORKER-{worker_id}] ⚡ FAILURE ROTATION: Worker available for next account despite failure")
+            else:
+                logger.info(f"[WORKER-{worker_id}] 🏁 QUEUE COMPLETE: No more accounts after failure")
+            
+            logger.error(f"[WORKER-{worker_id}] ❌ FAILED automation for {account.email} after {execution_time:.1f}s: {e}")
+            raise e
     
     def run_single_account_subprocess(self, account: EmailAccount, worker_id: int):
         """Run automation for a single account using subprocess with advanced parallel processing"""
@@ -1745,164 +1944,575 @@ STDERR OUTPUT:
             print(f"\n⚠️ Error searching for credentials for {account.email}: {e}")
     
     def monitor_workers_health(self, future_to_account):
-        """Monitor health of all workers and their Chrome processes"""
+        """Enhanced health monitoring with worker pool statistics and intelligent tracking"""
         try:
-            logger.info("[WORKER-TASK] Health monitoring started")
+            logger.info("🏥 [WORKER-HEALTH] Advanced health monitoring started")
             monitor_interval = 30  # Check every 30 seconds
+            health_check_count = 0
             
             while any(not future.done() for future in future_to_account.keys()):
                 time.sleep(monitor_interval)
+                health_check_count += 1
                 
-                active_workers = 0
-                for future, account in future_to_account.items():
-                    if not future.done():
-                        active_workers += 1
-                        worker_id = list(self.accounts).index(account) + 1
-                        
-                        # Check Chrome process health for this worker
+                # Get comprehensive worker pool status
+                active_workers_dict = self.worker_pool.get_active_workers()
+                worker_stats = self.worker_pool.get_worker_stats()
+                queue_status = self.worker_pool.get_queue_status()
+                
+                active_count = len(active_workers_dict)
+                
+                logger.info(f"🏥 [WORKER-HEALTH] Health Check #{health_check_count}")
+                logger.info(f"📊 [WORKER-HEALTH] Pool Status: {active_count}/{queue_status['total_capacity']} active, "
+                           f"{queue_status['available_workers']} available in queue")
+                
+                if active_count > 0:
+                    logger.info(f"🔄 [WORKER-HEALTH] Active Workers: {list(active_workers_dict.keys())}")
+                    
+                    # Check each active worker's health
+                    for worker_id, account_email in active_workers_dict.items():
+                        # Chrome process health check
                         chrome_health = self.check_chrome_processes_health(worker_id)
-                        if chrome_health:
-                            logger.info(f"[WORKER-TASK] Worker {worker_id} ({account.email}): Chrome processes healthy")
-                        else:
-                            logger.warning(f"[WORKER-TASK] Worker {worker_id} ({account.email}): Chrome process issues detected")
+                        worker_stat = worker_stats[worker_id]
                         
-                        # Log system resources every few cycles
-                        self.log_system_resources(worker_id)
-                
-                if active_workers > 0:
-                    logger.info(f"[WORKER-TASK] Health check: {active_workers} workers still active")
+                        # Calculate worker performance metrics
+                        avg_time = (worker_stat['total_time'] / max(1, worker_stat['total_accounts']))
+                        success_rate = (worker_stat['completed_accounts'] / max(1, worker_stat['total_accounts'])) * 100
+                        
+                        if chrome_health:
+                            logger.info(f"✅ [WORKER-{worker_id}] Health: Chrome OK, Account: {account_email}")
+                            logger.info(f"📈 [WORKER-{worker_id}] Stats: {worker_stat['completed_accounts']}✅/"
+                                       f"{worker_stat['failed_accounts']}❌, "
+                                       f"Avg: {avg_time:.1f}s, Success: {success_rate:.1f}%")
+                        else:
+                            logger.warning(f"⚠️ [WORKER-{worker_id}] Health: Chrome issues, Account: {account_email}")
+                            logger.warning(f"📊 [WORKER-{worker_id}] Stats: {worker_stat['completed_accounts']}✅/"
+                                          f"{worker_stat['failed_accounts']}❌, "
+                                          f"Avg: {avg_time:.1f}s, Success: {success_rate:.1f}%")
+                        
+                        # Enhanced system resource monitoring (every 4th check)
+                        if health_check_count % 4 == 0:
+                            self.log_system_resources(worker_id)
                 else:
-                    logger.info("[WORKER-TASK] All workers completed, ending health monitoring")
+                    logger.info("🏁 [WORKER-HEALTH] All workers completed, ending health monitoring")
                     break
+                
+                # Enhanced worker pool statistics summary (every 2nd check)
+                if health_check_count % 2 == 0:
+                    self.log_worker_pool_summary(worker_stats, queue_status)
                     
         except Exception as e:
-            logger.error(f"[WORKER-TASK] Health monitoring error: {e}")
+            logger.error(f"❌ [WORKER-HEALTH] Health monitoring error: {e}")
+    
+    def log_worker_pool_summary(self, worker_stats, queue_status):
+        """Log comprehensive worker pool performance summary with real-time dashboard"""
+        total_accounts = sum(stat['total_accounts'] for stat in worker_stats.values())
+        total_completed = sum(stat['completed_accounts'] for stat in worker_stats.values())
+        total_failed = sum(stat['failed_accounts'] for stat in worker_stats.values())
+        total_time = sum(stat['total_time'] for stat in worker_stats.values())
+        
+        if total_accounts > 0:
+            overall_success_rate = (total_completed / total_accounts) * 100
+            avg_time_per_account = total_time / total_accounts
+            
+            # Real-time dashboard display
+            logger.info("=" * 70)
+            logger.info("🎯 [REAL-TIME DASHBOARD] WORKER POOL PERFORMANCE")
+            logger.info("=" * 70)
+            logger.info(f"📊 [OVERALL] Total: {total_accounts} accounts, "
+                       f"✅ {total_completed} completed, ❌ {total_failed} failed")
+            logger.info(f"📈 [OVERALL] Success Rate: {overall_success_rate:.1f}%, "
+                       f"Avg Time: {avg_time_per_account:.1f}s/account")
+            logger.info(f"⚙️ [QUEUE] Available: {queue_status['available_workers']}, "
+                       f"Active: {queue_status['active_workers']}, "
+                       f"Capacity: {queue_status['total_capacity']}")
+            
+            # Visual queue representation
+            queue_visual = "["
+            for i in range(queue_status['total_capacity']):
+                worker_id = i + 1
+                if worker_id in [worker_id for worker_id, stat in worker_stats.items() if stat['is_active']]:
+                    queue_visual += "🔄"  # Active worker
+                else:
+                    queue_visual += "💤"  # Idle worker
+            queue_visual += "]"
+            logger.info(f"🎛️ [VISUAL] Worker Status: {queue_visual}")
+            
+            # Individual worker performance with enhanced metrics
+            logger.info("-" * 70)
+            for worker_id in sorted(worker_stats.keys()):
+                stat = worker_stats[worker_id]
+                if stat['total_accounts'] > 0:
+                    worker_success_rate = (stat['completed_accounts'] / stat['total_accounts']) * 100
+                    worker_avg_time = stat['total_time'] / stat['total_accounts']
+                    
+                    # Performance tier
+                    if worker_success_rate >= 100:
+                        performance = "🏆 EXCELLENT"
+                    elif worker_success_rate >= 90:
+                        performance = "🥇 OUTSTANDING"
+                    elif worker_success_rate >= 80:
+                        performance = "🥈 GOOD"
+                    elif worker_success_rate >= 70:
+                        performance = "🥉 ADEQUATE"
+                    else:
+                        performance = "⚠️ NEEDS ATTENTION"
+                    
+                    # Speed tier
+                    if worker_avg_time <= 300:  # 5 minutes
+                        speed = "⚡ FAST"
+                    elif worker_avg_time <= 600:  # 10 minutes
+                        speed = "🚶 NORMAL"
+                    else:
+                        speed = "🐌 SLOW"
+                    
+                    status_icon = "🔄" if stat['is_active'] else "💤"
+                    current_task = f" ({stat['current_account']})" if stat['current_account'] else ""
+                    
+                    logger.info(f"⚙️ [WORKER-{worker_id}] {status_icon} {performance} {speed}")
+                    logger.info(f"   📊 Stats: {stat['completed_accounts']}✅/{stat['failed_accounts']}❌ "
+                               f"({worker_success_rate:.1f}% success, {worker_avg_time:.1f}s avg){current_task}")
+                else:
+                    logger.info(f"⚙️ [WORKER-{worker_id}] 💤 No accounts processed yet")
+            
+            logger.info("=" * 70)
+        else:
+            logger.info("📊 [POOL-SUMMARY] No accounts processed yet - workers initializing...")
     
     def run_automation(self):
-        """Run automation for all accounts using thread pool with proper queuing"""
+        """Run automation with dynamic worker rotation - immediately move to next account when one completes"""
         if not self.accounts:
             logger.error("No accounts loaded!")
             return False
         
-        logger.info(f"Starting multi-threaded automation for {len(self.accounts)} accounts")
-        logger.info(f"Using {self.max_workers} concurrent workers")
-        logger.info("Each worker will run auto.py as an isolated subprocess")
-        logger.info(f"Worker allocation: {len(self.accounts)} accounts will be processed by {self.max_workers} workers in batches")
+        # Enhanced startup display
+        print("\n" + "🚀" * 30)
+        print("🚀 DYNAMIC WORKER ROTATION AUTOMATION STARTING")
+        print("🚀" * 30)
+        print(f"📊 Accounts to process: {len(self.accounts)}")
+        print(f"⚙️  Worker pool: {self.max_workers} workers with immediate rotation")
+        print(f"🎯 Dynamic features:")
+        print(f"   • ⚡ Immediate worker rotation when account completes/fails")
+        print(f"   • 🔄 Continuous processing - no waiting for other workers")
+        print(f"   • 📈 Real-time queue management and load balancing")
+        print(f"   • 🚀 Maximum throughput with optimal resource utilization")
+        print(f"   • 📊 Live performance monitoring and statistics")
+        print(f"📁 Final credentials location: {self.final_credentials_dir}")
+        print("🚀" * 30)
+        
+        logger.info(f"🚀 Starting DYNAMIC multi-threaded automation for {len(self.accounts)} accounts")
+        logger.info(f"⚙️  Using dynamic worker pool with immediate rotation")
+        logger.info("🎯 Workers will continuously process accounts without waiting")
+        logger.info(f"📈 Dynamic allocation: Accounts processed immediately as workers become available")
+        
+        # Initialize dynamic account queue
+        self.worker_pool.add_accounts_to_queue(self.accounts)
+        
+        # Display initial queue status
+        queue_status = self.worker_pool.get_queue_status()
+        logger.info(f"🔧 Dynamic queue initialized: {queue_status['pending_accounts']} accounts queued, "
+                   f"{queue_status['available_workers']} workers ready")
         
         start_time = datetime.now()
         
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Submit all tasks - ThreadPoolExecutor will queue them automatically
-                future_to_account = {}
-                for account_index, account in enumerate(self.accounts):
-                    # Worker ID will be assigned dynamically by the thread pool
-                    # We'll calculate it in the worker function itself
-                    logger.info(f"[WORKER-TASK] Submitting task for account {account.email} (account {account_index + 1}/{len(self.accounts)})")
-                    future = executor.submit(self.run_single_account_subprocess_with_queue, account, account_index)
-                    future_to_account[future] = account
-                
-                # Monitor progress with detailed worker task actions and health checks
-                completed = 0
-                total_workers = len(future_to_account)
-                logger.info(f"[WORKER-TASK] Starting monitoring of {total_workers} worker tasks")
-                
-                # Start health monitoring thread
-                health_monitor_thread = threading.Thread(
-                    target=self.monitor_workers_health, 
-                    args=(future_to_account,), 
-                    daemon=True
-                )
-                health_monitor_thread.start()
-                logger.info(f"[WORKER-TASK] Health monitoring thread started")
-                
-                for future in concurrent.futures.as_completed(future_to_account):
-                    account = future_to_account[future]
-                    completed += 1
-                    
-                    logger.info(f"[WORKER-TASK] Task completed for worker monitoring - Account: {account.email}")
-                    logger.info(f"[WORKER-TASK] Progress: {completed}/{len(self.accounts)} tasks completed")
-                    
-                    try:
-                        result = future.result()
-                        status = "SUCCESS" if result else "FAILED"
-                        logger.info(f"[WORKER-TASK] Task result for {account.email}: {status}")
-                        logger.info(f"[WORKER-TASK] Account final status: {account.status}")
-                        logger.info(f"[WORKER-TASK] Worker directory: {account.worker_dir}")
-                        
-                        # Log detailed task completion information
-                        if account.start_time and account.end_time:
-                            task_duration = (account.end_time - account.start_time).total_seconds()
-                            logger.info(f"[WORKER-TASK] Task duration: {task_duration:.1f} seconds")
-                            if task_duration > 600:  # More than 10 minutes
-                                logger.warning(f"[WORKER-TASK] Long-running task detected for {account.email}")
-                        
-                        # Log credential discovery results
-                        if hasattr(account, 'credentials_path') and account.credentials_path:
-                            logger.info(f"[WORKER-TASK] Credentials found: {os.path.basename(account.credentials_path)}")
-                        else:
-                            logger.warning(f"[WORKER-TASK] No credentials found for {account.email}")
-                        
-                        # Log any errors encountered
-                        if account.error_message:
-                            logger.error(f"[WORKER-TASK] Task error for {account.email}: {account.error_message}")
-                        
-                        logger.info(f"[WORKER-TASK] Overall progress: {completed}/{len(self.accounts)} - {account.email} - {status}")
-                        
-                    except Exception as e:
-                        logger.error(f"[WORKER-TASK] Task exception for {account.email}: {str(e)}")
-                        logger.error(f"[WORKER-TASK] Exception type: {type(e).__name__}")
-                        logger.error(f"[WORKER-TASK] Progress: {completed}/{len(self.accounts)} - {account.email} - EXCEPTION")
+            # Start dynamic worker dispatcher threads
+            dispatcher_threads = []
             
+            # Create one dispatcher thread per worker for immediate processing
+            for worker_num in range(self.max_workers):
+                dispatcher_thread = threading.Thread(
+                    target=self.dynamic_worker_dispatcher,
+                    args=(worker_num + 1,),
+                    daemon=False,
+                    name=f"DynamicDispatcher-{worker_num + 1}"
+                )
+                dispatcher_threads.append(dispatcher_thread)
+                dispatcher_thread.start()
+                logger.info(f"[DYNAMIC] Started dispatcher thread {worker_num + 1}")
+            
+            # Start enhanced health monitoring
+            health_monitor_thread = threading.Thread(
+                target=self.monitor_dynamic_workers_health,
+                daemon=True,
+                name="DynamicHealthMonitor"
+            )
+            health_monitor_thread.start()
+            logger.info(f"[DYNAMIC] Started dynamic health monitoring")
+            
+            # Wait for all dispatcher threads to complete
+            logger.info(f"[DYNAMIC] Waiting for all {len(dispatcher_threads)} dispatcher threads to complete...")
+            for i, thread in enumerate(dispatcher_threads):
+                thread.join()
+                logger.info(f"[DYNAMIC] Dispatcher thread {i + 1} completed")
+            
+            # All workers finished
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
+            # Final statistics
+            final_queue_status = self.worker_pool.get_queue_status()
+            logger.info(f"[DYNAMIC] 🏁 All dispatcher threads completed!")
+            logger.info(f"[DYNAMIC] 📊 Final status: {final_queue_status['completed_accounts']} completed, "
+                       f"{final_queue_status['failed_accounts']} failed")
+            
             # Summary of instant credential collection results
-            logger.info("[WORKER-TASK] Summarizing instant credential collection results...")
+            logger.info("[DYNAMIC] Summarizing dynamic automation results...")
             print("\n" + "=" * 60)
-            print("� INSTANT CREDENTIAL COLLECTION SUMMARY")
+            print("� DYNAMIC WORKER ROTATION SUMMARY")
             print("=" * 60)
             
             # Check what files were collected instantly
             instant_collection_summary = self.get_instant_collection_summary()
             
-            # Print final summary
-            self.print_summary(duration, instant_collection_summary)
+            # Print enhanced summary with dynamic statistics
+            self.print_dynamic_summary(duration, instant_collection_summary)
             return True
             
         except Exception as e:
-            logger.error(f"Multi-threading error: {e}")
+            logger.error(f"Dynamic multi-threading error: {e}")
             return False
     
+    def dynamic_worker_dispatcher(self, dispatcher_id):
+        """Dynamic worker dispatcher - continuously processes accounts as they become available"""
+        logger.info(f"[DISPATCHER-{dispatcher_id}] 🚀 Dynamic dispatcher started - ready for continuous processing")
+        
+        processed_count = 0
+        
+        try:
+            while True:
+                # Get next account from dynamic queue
+                account, account_index = self.worker_pool.get_next_account()
+                
+                if account is None:
+                    logger.info(f"[DISPATCHER-{dispatcher_id}] 🏁 No more accounts - dispatcher completed")
+                    logger.info(f"[DISPATCHER-{dispatcher_id}] 📊 Total processed: {processed_count} accounts")
+                    break
+                
+                processed_count += 1
+                logger.info(f"[DISPATCHER-{dispatcher_id}] ⚡ Processing account {processed_count}: {account.email}")
+                
+                try:
+                    # Process the account immediately
+                    result = self.run_single_account_subprocess_with_queue(account, account_index)
+                    status = "SUCCESS" if result else "FAILED"
+                    logger.info(f"[DISPATCHER-{dispatcher_id}] ✅ Account {account.email}: {status}")
+                    
+                except Exception as e:
+                    logger.error(f"[DISPATCHER-{dispatcher_id}] ❌ Account {account.email} failed: {e}")
+                    account.status = "failed"
+                    account.error_message = str(e)
+                    self.failed_counter.increment()
+                
+                # Continue immediately to next account (no waiting)
+                
+        except Exception as e:
+            logger.error(f"[DISPATCHER-{dispatcher_id}] ❌ Dispatcher error: {e}")
+        
+        finally:
+            logger.info(f"[DISPATCHER-{dispatcher_id}] 🏁 Dispatcher completed - processed {processed_count} accounts")
+    
+    def monitor_dynamic_workers_health(self):
+        """Enhanced health monitoring for dynamic worker rotation"""
+        try:
+            logger.info("� [DYNAMIC-HEALTH] Dynamic health monitoring started")
+            monitor_interval = 20  # Check every 20 seconds for dynamic systems
+            health_check_count = 0
+            
+            while True:
+                time.sleep(monitor_interval)
+                health_check_count += 1
+                
+                # Get comprehensive dynamic status
+                queue_status = self.worker_pool.get_queue_status()
+                worker_stats = self.worker_pool.get_worker_stats()
+                
+                # Check if processing is complete
+                if (queue_status['pending_accounts'] == 0 and 
+                    queue_status['active_workers'] == 0):
+                    logger.info("🏁 [DYNAMIC-HEALTH] All accounts processed - ending health monitoring")
+                    break
+                
+                logger.info(f"🏥 [DYNAMIC-HEALTH] Health Check #{health_check_count}")
+                logger.info(f"📊 [DYNAMIC-HEALTH] Queue: {queue_status['pending_accounts']} pending, "
+                           f"{queue_status['active_workers']}/{queue_status['total_capacity']} active")
+                logger.info(f"📈 [DYNAMIC-HEALTH] Progress: {queue_status['completed_accounts']}✅/"
+                           f"{queue_status['failed_accounts']}❌ completed")
+                
+                # Enhanced worker health checks
+                active_workers_dict = self.worker_pool.get_active_workers()
+                if active_workers_dict:
+                    logger.info(f"🔄 [DYNAMIC-HEALTH] Active Workers: {list(active_workers_dict.keys())}")
+                    
+                    for worker_id, account_email in active_workers_dict.items():
+                        # Check Chrome process health
+                        chrome_health = self.check_chrome_processes_health(worker_id)
+                        
+                        # Calculate current execution time
+                        worker_stat = worker_stats[worker_id]
+                        if worker_stat['start_time']:
+                            current_time = (datetime.now() - worker_stat['start_time']).total_seconds()
+                            
+                            if chrome_health:
+                                logger.info(f"✅ [WORKER-{worker_id}] Healthy: {account_email} "
+                                           f"(running {current_time:.1f}s)")
+                            else:
+                                logger.warning(f"⚠️ [WORKER-{worker_id}] Chrome issues: {account_email} "
+                                              f"(running {current_time:.1f}s)")
+                            
+                            # Alert for long-running processes
+                            if current_time > 900:  # 15 minutes
+                                logger.warning(f"🐌 [WORKER-{worker_id}] Long-running process: "
+                                              f"{account_email} ({current_time/60:.1f} minutes)")
+                
+                # Dynamic statistics summary (every 3rd check)
+                if health_check_count % 3 == 0:
+                    self.log_dynamic_pool_summary(worker_stats, queue_status)
+                    
+        except Exception as e:
+            logger.error(f"❌ [DYNAMIC-HEALTH] Health monitoring error: {e}")
+    
+    def log_dynamic_pool_summary(self, worker_stats, queue_status):
+        """Log dynamic worker pool performance with live updates"""
+        total_processed = queue_status['completed_accounts'] + queue_status['failed_accounts']
+        total_pending = queue_status['pending_accounts']
+        total_accounts = total_processed + total_pending
+        
+        if total_processed > 0:
+            success_rate = (queue_status['completed_accounts'] / total_processed) * 100
+            
+            logger.info("=" * 70)
+            logger.info("🎯 [DYNAMIC DASHBOARD] LIVE WORKER PERFORMANCE")
+            logger.info("=" * 70)
+            logger.info(f"� [PROGRESS] {total_processed}/{total_accounts} accounts processed "
+                       f"({(total_processed/total_accounts)*100:.1f}% complete)")
+            logger.info(f"📈 [SUCCESS] {queue_status['completed_accounts']}✅/"
+                       f"{queue_status['failed_accounts']}❌ ({success_rate:.1f}% success rate)")
+            logger.info(f"⚙️ [WORKERS] {queue_status['active_workers']}/{queue_status['total_capacity']} active, "
+                       f"{queue_status['available_workers']} ready for next account")
+            
+            # Estimated completion time
+            if queue_status['active_workers'] > 0 and total_pending > 0:
+                # Calculate average processing time
+                total_time = sum(stat['total_time'] for stat in worker_stats.values())
+                if total_processed > 0:
+                    avg_time_per_account = total_time / total_processed
+                    estimated_remaining = (total_pending * avg_time_per_account) / queue_status['active_workers']
+                    logger.info(f"⏱️ [ESTIMATE] ~{estimated_remaining/60:.1f} minutes remaining "
+                               f"(avg {avg_time_per_account:.1f}s per account)")
+            
+            logger.info("=" * 70)
+        else:
+            logger.info("📊 [DYNAMIC] Processing starting - workers initializing...")
+    
+    def print_dynamic_summary(self, duration, collected_credentials=None):
+        """Enhanced automation summary with dynamic worker rotation statistics"""
+        total = len(self.accounts)
+        queue_status = self.worker_pool.get_queue_status()
+        completed = queue_status['completed_accounts']
+        failed = queue_status['failed_accounts']
+        
+        # Get comprehensive worker pool statistics
+        worker_stats = self.worker_pool.get_worker_stats()
+        
+        print("\n" + "="*80)
+        print("🔄 DYNAMIC WORKER ROTATION AUTOMATION SUMMARY")
+        print("="*80)
+        
+        # Basic statistics with dynamic features
+        print(f"📊 EXECUTION STATISTICS:")
+        print(f"   📁 Total Accounts: {total}")
+        print(f"   ✅ Successful: {completed}")
+        print(f"   ❌ Failed: {failed}")
+        print(f"   ⏱️  Total Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+        if total > 0:
+            print(f"   📈 Average per Account: {duration/total:.1f} seconds")
+            print(f"   🎯 Success Rate: {(completed/total)*100:.1f}%")
+        
+        # Dynamic worker rotation statistics
+        print(f"\n🔄 DYNAMIC ROTATION PERFORMANCE:")
+        print(f"   🚀 Rotation Mode: Immediate worker assignment on completion/failure")
+        print(f"   ⚡ Queue Processing: Continuous - no waiting between accounts")
+        print(f"   🔧 Worker Pool: {self.max_workers} workers with instant rotation")
+        print(f"   📊 Final Queue Status: {queue_status['pending_accounts']} pending, "
+              f"{queue_status['available_workers']} available")
+        
+        # Individual worker performance with rotation metrics
+        total_pool_accounts = sum(stat['total_accounts'] for stat in worker_stats.values())
+        total_pool_time = sum(stat['total_time'] for stat in worker_stats.values())
+        
+        if total_pool_accounts > 0:
+            overall_efficiency = (total_pool_time / total_pool_accounts)
+            print(f"   ⚡ Rotation Efficiency: {overall_efficiency:.1f}s average per account")
+            
+            print(f"\n🔄 INDIVIDUAL WORKER ROTATION STATS:")
+            for worker_id in sorted(worker_stats.keys()):
+                stat = worker_stats[worker_id]
+                if stat['total_accounts'] > 0:
+                    worker_success_rate = (stat['completed_accounts'] / stat['total_accounts']) * 100
+                    worker_avg_time = stat['total_time'] / stat['total_accounts']
+                    worker_efficiency = "🏆 Excellent" if worker_success_rate >= 100 else "✅ Good" if worker_success_rate >= 80 else "⚠️ Needs attention"
+                    
+                    print(f"   ⚙️ Worker {worker_id}: "
+                          f"{stat['completed_accounts']}✅/{stat['failed_accounts']}❌ "
+                          f"({worker_success_rate:.1f}% success, {worker_avg_time:.1f}s avg) {worker_efficiency}")
+                else:
+                    print(f"   ⚙️ Worker {worker_id}: No accounts processed")
+        
+        # Enhanced credential collection summary
+        if collected_credentials is not None:
+            print(f"\n📁 CREDENTIAL COLLECTION RESULTS:")
+            print(f"   📄 Files Collected: {len(collected_credentials)}")
+            if total > 0:
+                collection_rate = (len(collected_credentials)/total)*100
+                collection_status = "🏆 Excellent" if collection_rate >= 90 else "✅ Good" if collection_rate >= 70 else "⚠️ Needs improvement"
+                print(f"   📈 Collection Rate: {collection_rate:.1f}% {collection_status}")
+            
+            if collected_credentials:
+                print(f"   📁 Final Location: {self.final_credentials_dir}")
+                print(f"   📄 Collected Files:")
+                for i, cred in enumerate(collected_credentials[:5]):  # Show first 5
+                    print(f"      {i+1}. {cred['filename']} ({cred.get('email', 'unknown')})")
+                if len(collected_credentials) > 5:
+                    print(f"      ... and {len(collected_credentials) - 5} more files")
+            else:
+                print(f"   ⚠️ No credential files collected")
+                print(f"   🔍 Check individual worker directories for manual collection")
+        
+        # Account details with enhanced formatting
+        print(f"\n📋 DETAILED ACCOUNT RESULTS:")
+        print("-" * 80)
+        for i, account in enumerate(self.accounts, 1):
+            status_icon = "✅" if account.status == "completed" else "❌" if account.status == "failed" else "⏳"
+            duration_text = ""
+            if account.start_time and account.end_time:
+                account_duration = (account.end_time - account.start_time).total_seconds()
+                duration_text = f" ({account_duration:.1f}s)"
+            
+            print(f"   {i:2d}. {status_icon} {account.email} - {account.status}{duration_text}")
+            
+            # Enhanced credential status
+            if hasattr(account, 'credentials_path') and account.credentials_path:
+                cred_filename = os.path.basename(account.credentials_path)
+                print(f"       📄 Credentials: {cred_filename}")
+            else:
+                print(f"       📄 Credentials: Not collected")
+            
+            if account.error_message:
+                print(f"       ❌ Error: {account.error_message[:100]}...")
+            
+            if hasattr(account, 'worker_dir') and account.worker_dir:
+                print(f"       📁 Worker Dir: {account.worker_dir}")
+        
+        print("="*80)
+        print(f"🔄 DYNAMIC ROTATION COMPLETED!")
+        print(f"⏱️  Total time: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+        print(f"🚀 Rotation advantage: Immediate processing - no worker idle time")
+        print(f"📁 Worker directories preserved at: {self.base_dir}")
+        print(f"📄 All credentials collected in: {self.final_credentials_dir}")
+        print("="*80)
+    
     def print_summary(self, duration, collected_credentials=None):
-        """Print automation summary with credential collection information"""
+        """Enhanced automation summary with worker pool statistics and credential collection information"""
         total = len(self.accounts)
         completed = self.completed_counter.get_value()
         failed = self.failed_counter.get_value()
         
-        print("\n" + "="*60)
-        print("MULTI-THREADED AUTOMATION SUMMARY")
-        print("="*60)
-        print(f"Total Accounts: {total}")
-        print(f"Successful: {completed}")
-        print(f"Failed: {failed}")
-        print(f"Total Duration: {duration:.1f} seconds")
-        if total > 0:
-            print(f"Average per Account: {duration/total:.1f} seconds")
-            print(f"Success Rate: {(completed/total)*100:.1f}%")
+        # Get comprehensive worker pool statistics
+        worker_stats = self.worker_pool.get_worker_stats()
+        queue_status = self.worker_pool.get_queue_status()
         
-        # Credential collection summary
+        print("\n" + "="*80)
+        print("🚀 ADVANCED MULTI-THREADED AUTOMATION SUMMARY")
+        print("="*80)
+        
+        # Basic statistics
+        print(f"📊 EXECUTION STATISTICS:")
+        print(f"   📁 Total Accounts: {total}")
+        print(f"   ✅ Successful: {completed}")
+        print(f"   ❌ Failed: {failed}")
+        print(f"   ⏱️  Total Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+        if total > 0:
+            print(f"   📈 Average per Account: {duration/total:.1f} seconds")
+            print(f"   🎯 Success Rate: {(completed/total)*100:.1f}%")
+        
+        # Enhanced worker pool statistics
+        print(f"\n⚙️  WORKER POOL PERFORMANCE:")
+        print(f"   🔧 Pool Configuration: {queue_status['total_capacity']} workers with advanced queue management")
+        print(f"   📊 Final Status: {queue_status['active_workers']} active, {queue_status['available_workers']} available")
+        
+        # Individual worker performance analysis
+        total_pool_accounts = sum(stat['total_accounts'] for stat in worker_stats.values())
+        total_pool_time = sum(stat['total_time'] for stat in worker_stats.values())
+        
+        if total_pool_accounts > 0:
+            overall_efficiency = (total_pool_time / total_pool_accounts)
+            print(f"   ⚡ Pool Efficiency: {overall_efficiency:.1f}s average per account")
+            
+            print(f"\n🔄 INDIVIDUAL WORKER PERFORMANCE:")
+            for worker_id in sorted(worker_stats.keys()):
+                stat = worker_stats[worker_id]
+                if stat['total_accounts'] > 0:
+                    worker_success_rate = (stat['completed_accounts'] / stat['total_accounts']) * 100
+                    worker_avg_time = stat['total_time'] / stat['total_accounts']
+                    worker_efficiency = "🏆 Excellent" if worker_success_rate >= 100 else "✅ Good" if worker_success_rate >= 80 else "⚠️ Needs attention"
+                    
+                    print(f"   ⚙️ Worker {worker_id}: "
+                          f"{stat['completed_accounts']}✅/{stat['failed_accounts']}❌ "
+                          f"({worker_success_rate:.1f}% success, {worker_avg_time:.1f}s avg) {worker_efficiency}")
+                else:
+                    print(f"   ⚙️ Worker {worker_id}: No accounts processed")
+        
+        # Enhanced credential collection summary
         if collected_credentials is not None:
-            print(f"\nCREDENTIAL COLLECTION:")
-            print(f"Files Collected: {len(collected_credentials)}")
-            print(f"Collection Rate: {(len(collected_credentials)/total)*100:.1f}%")
+            print(f"\n📁 CREDENTIAL COLLECTION RESULTS:")
+            print(f"   📄 Files Collected: {len(collected_credentials)}")
+            if total > 0:
+                collection_rate = (len(collected_credentials)/total)*100
+                collection_status = "🏆 Excellent" if collection_rate >= 90 else "✅ Good" if collection_rate >= 70 else "⚠️ Needs improvement"
+                print(f"   📈 Collection Rate: {collection_rate:.1f}% {collection_status}")
+            
             if collected_credentials:
-                print(f"📁 Final Location: {self.final_credentials_dir}")
-                print("📄 Collected Files:")
-                for cred in collected_credentials[:5]:  # Show first 5
-                    print(f"   • {cred['filename']} ({cred['email']})")
+                print(f"   📁 Final Location: {self.final_credentials_dir}")
+                print(f"   📄 Collected Files:")
+                for i, cred in enumerate(collected_credentials[:5]):  # Show first 5
+                    print(f"      {i+1}. {cred['filename']} ({cred['email']})")
                 if len(collected_credentials) > 5:
-                    print(f"   ... and {len(collected_credentials) - 5} more")
+                    print(f"      ... and {len(collected_credentials) - 5} more files")
+            else:
+                print(f"   ⚠️ No credential files collected")
+                print(f"   🔍 Check individual worker directories for manual collection")
+        
+        # Account details with enhanced formatting
+        print(f"\n📋 DETAILED ACCOUNT RESULTS:")
+        print("-" * 80)
+        for i, account in enumerate(self.accounts, 1):
+            status_icon = "✅" if account.status == "completed" else "❌" if account.status == "failed" else "⏳"
+            duration_text = ""
+            if account.start_time and account.end_time:
+                account_duration = (account.end_time - account.start_time).total_seconds()
+                duration_text = f" ({account_duration:.1f}s)"
+            
+            print(f"   {i:2d}. {status_icon} {account.email} - {account.status}{duration_text}")
+            
+            # Enhanced credential status
+            if hasattr(account, 'credentials_path') and account.credentials_path:
+                cred_filename = os.path.basename(account.credentials_path)
+                print(f"       📄 Credentials: {cred_filename}")
+            else:
+                print(f"       📄 Credentials: Not collected")
+            
+            if account.error_message:
+                print(f"       ❌ Error: {account.error_message[:100]}...")
+            
+            if hasattr(account, 'worker_dir') and account.worker_dir:
+                print(f"       📁 Worker Dir: {account.worker_dir}")
+        
+        print("="*80)
+        print(f"🎉 AUTOMATION COMPLETED!")
+        print(f"⏱️  Total time: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+        print(f"📁 Worker directories preserved at: {self.base_dir}")
+        print(f"📄 All credentials collected in: {self.final_credentials_dir}")
+        print("="*80)
         
         print("\nACCOUNT DETAILS:")
         print("-" * 60)
@@ -3002,18 +3612,21 @@ def main():
     print()
     
     # Get number of workers from user with enhanced guidance
-    print("Configuring concurrent workers...")
-    print("Recommendations:")
-    print("  - 1-2 workers: Safer, less resource intensive")
-    print("  - 3-5 workers: Good balance for most systems")
-    print("  - 6+ workers: High-end systems only, may cause issues")
+    print("🔧 CONFIGURING ADVANCED WORKER POOL...")
+    print("Recommendations for optimal performance:")
+    print("  - 🥉 1 worker: Single-threaded, safest for low-end systems")
+    print("  - 🥈 2 workers: OPTIMAL for most systems, best resource balance")
+    print("  - 🥇 3-4 workers: Good for high-performance systems")
+    print("  - ⚠️  5+ workers: High-end systems only, may cause resource issues")
+    print()
+    print("💡 The advanced worker pool will manage queue distribution automatically!")
     print()
     
     while True:
         try:
-            max_workers_input = input("Enter number of concurrent workers (1-10, default=3): ").strip()
+            max_workers_input = input("Enter number of concurrent workers (1-10, default=2): ").strip()
             if not max_workers_input:
-                max_workers = 3  # Default value
+                max_workers = 2  # Enhanced default for optimal performance
                 break
             max_workers = int(max_workers_input)
             if 1 <= max_workers <= 10:
@@ -3023,7 +3636,8 @@ def main():
         except ValueError:
             print("Please enter a valid number.")
     
-    print(f"Using {max_workers} concurrent workers.")
+    print(f"🚀 Using {max_workers} workers with advanced queue management.")
+    print(f"⚙️  Worker pool will provide intelligent load balancing and statistics tracking.")
     print()
     
     # Ask about terminal visibility
@@ -3194,18 +3808,14 @@ def main():
     
     input("\nPress Enter to exit...")
 
-if __name__ == "__main__":
-    main()
-import os
-
 def test_instant_collection_automation():
     """Test instant collection with the actual automation system"""
     print("🚀 Starting Multi-Threaded Automation with Instant Credential Collection")
     print("=" * 70)
     
     try:
-        # Create automation instance with 3 workers (as in original) and hidden terminals
-        automation = SubprocessMultiThreadedAutomation(max_workers=3, show_terminals=False)
+        # Create automation instance with 2 workers for proper rotation and hidden terminals
+        automation = SubprocessMultiThreadedAutomation(max_workers=2, show_terminals=False)
         
         # Load accounts from CSV
         if not automation.load_accounts_from_csv("gmail_accounts.csv"):
@@ -3233,4 +3843,9 @@ def test_instant_collection_automation():
         return False
 
 if __name__ == "__main__":
-    test_instant_collection_automation()
+    # Choose which function to run
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        test_instant_collection_automation()
+    else:
+        main()
