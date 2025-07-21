@@ -2,6 +2,29 @@ print("🔄 Starting Multi-Instance Google Login Automation Script...")
 print("⚡ ULTRA FAST: Multi-instance support with isolated Chrome profiles")
 print("📦 Loading required modules...")
 
+"""
+ENHANCED AUTOMATION SCRIPT WITH IMPROVED OVERLAY HANDLING
+=======================================================
+
+Recent Improvements (2025):
+1. ✅ Fixed handle_2fa_and_verification() missing driver argument error
+2. ✅ Enhanced dismiss_overlay() function to handle Google Console tutorial tooltips and overlays
+3. ✅ Added comprehensive handle_google_console_first_time_setup() function for:
+   - Country selection modal (Austria selection)
+   - Terms of Service agreement checkbox
+   - Continue/Accept button handling
+4. ✅ Improved safe_click() function to better handle element click interceptions
+5. ✅ Enhanced project name filling and create button clicking with overlay dismissal
+6. ✅ Better error handling and fallback mechanisms for all UI interactions
+7. ✅ Comprehensive tutorial overlay detection and dismissal
+
+These improvements ensure the automation works reliably even when:
+- Google shows tutorial overlays/tooltips for new accounts
+- CDK overlay backdrops block click interactions
+- First-time users encounter country selection and terms agreement modals
+- Various UI elements have click interception issues
+"""
+
 import time
 import random
 import pyautogui
@@ -33,75 +56,710 @@ START_TIME_FORMATTED = time.strftime('%H:%M:%S', time.localtime(AUTOMATION_START
 def dismiss_overlay(driver):
     """Dismiss any overlay tooltips or popups that might intercept clicks"""
     try:
-        # Try to find any visible tooltips or overlays
+        print("🔍 Scanning for overlays and tutorial tooltips...")
+        
+        # CRITICAL: First check for CDK overlay backdrop causing click interception
+        print("🎯 Priority check for CDK overlay backdrop that blocks clicks...")
+        try:
+            # Check for multiple types of problematic backdrops
+            backdrop_selectors = [
+                ".cdk-overlay-backdrop",
+                ".cdk-overlay-backdrop-showing", 
+                ".cdk-overlay-dark-backdrop",
+                ".mat-overlay-backdrop",
+                "div[class*='cdk-overlay-backdrop']",
+                "div[class*='overlay-backdrop']"
+            ]
+            
+            backdrops_removed = 0
+            for selector in backdrop_selectors:
+                try:
+                    backdrops = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for backdrop in backdrops:
+                        if backdrop.is_displayed():
+                            backdrop_classes = backdrop.get_attribute("class") or ""
+                            print(f"🚨 Found backdrop with classes: {backdrop_classes}")
+                            
+                            # Check if this is a legitimate modal backdrop we should preserve
+                            if is_legitimate_modal_backdrop(driver, backdrop):
+                                print("ℹ️ Backdrop appears to be legitimate modal - preserving")
+                                continue
+                            
+                            # Remove problematic backdrop with multiple methods
+                            removal_success = False
+                            
+                            # Method 1: JavaScript removal
+                            try:
+                                driver.execute_script("arguments[0].remove();", backdrop)
+                                print("✅ Removed CDK overlay backdrop")
+                                removal_success = True
+                                backdrops_removed += 1
+                            except:
+                                # Method 2: Hide with CSS
+                                try:
+                                    driver.execute_script("arguments[0].style.display = 'none';", backdrop)
+                                    print("✅ Hidden CDK overlay backdrop")
+                                    removal_success = True
+                                    backdrops_removed += 1
+                                except:
+                                    # Method 3: Set visibility hidden
+                                    try:
+                                        driver.execute_script("arguments[0].style.visibility = 'hidden';", backdrop)
+                                        print("✅ Made CDK overlay backdrop invisible")
+                                        removal_success = True
+                                        backdrops_removed += 1
+                                    except:
+                                        pass
+                            
+                            if removal_success:
+                                time.sleep(0.3)  # Brief pause after each removal
+                except Exception as selector_error:
+                    continue
+                    
+            if backdrops_removed > 0:
+                print(f"✅ Removed {backdrops_removed} problematic overlay backdrops")
+                time.sleep(1.0)  # Wait for DOM to settle
+            else:
+                print("ℹ️ No problematic CDK backdrops found")
+                
+        except Exception as cdk_error:
+            print(f"⚠️ Error handling CDK backdrop: {cdk_error}")
+        
+        # Enhanced overlay detection for Google Console tutorial tooltips
         overlay_selectors = [
+            # Google Console navigation tutorial (PRIORITY - most common blocker)
+            "//div[contains(@class, 'pcc-console-nav-circle') and contains(@class, 'show')]",
+            "//div[contains(@class, 'pcc-console-nav-circle-box')]",
+            "//button[@aria-label='Got it' and contains(@class, 'mat-primary')]",
+            "//span[text()='Got it']/parent::button",
+            "//div[contains(@class, 'pcc-console-nav-circle')]//button[contains(@aria-label, 'Got it')]",
+            
+            # Tutorial tooltip overlays (Google Console specific)
+            "//div[contains(@class, 'cfc-tooltip-overlay')]",
             "//cfc-tooltip-overlay",
+            "//div[contains(@class, 'tutorial-overlay')]",
+            "//div[contains(@class, 'walkthrough-overlay')]",
+            "//div[contains(@class, 'help-overlay')]",
+            "//div[contains(@class, 'product-tour')]",
+            "//div[contains(@class, 'intro-overlay')]",
+            
+            # Standard overlay patterns
             "//div[contains(@class, 'cdk-overlay-backdrop')]",
+            "//div[contains(@class, 'mat-overlay-backdrop')]", 
+            "//div[contains(@class, 'cdk-overlay-container')]",
+            "//div[contains(@class, 'cdk-global-overlay-wrapper')]",
+            
+            # Close buttons for tooltips and tutorials
             "//button[contains(@class, 'cfc-tooltip-close-button')]",
-            "//button[contains(@aria-label, 'Close')]",
-            "//div[contains(@class, 'tooltip')]//button[contains(@class, 'close')]",
-            "//mat-icon-button[contains(@aria-label, 'Close')]"
+            "//button[contains(@aria-label, 'Close') and contains(@class, 'tooltip')]",
+            "//button[contains(@aria-label, 'Dismiss')]",
+            "//button[contains(@aria-label, 'Skip')]",
+            "//button[contains(@aria-label, 'Skip tutorial')]",
+            "//button[contains(@aria-label, 'Skip tour')]",
+            "//button[contains(@title, 'Close')]",
+            "//button[contains(@title, 'Skip')]",
+            "//button[contains(@title, 'Dismiss')]",
+            
+            # X close buttons and icons
+            "//mat-icon-button[contains(@aria-label, 'Close')]",
+            "//button[.//mat-icon[text()='close']]",
+            "//button[.//mat-icon[text()='clear']]",
+            "//button[.//svg[contains(@class, 'close')]]",
+            "//span[contains(@class, 'close-icon')]//parent::button",
+            
+            # Tutorial specific dismiss buttons
+            "//span[text()='Skip']//parent::button",
+            "//span[text()='Close']//parent::button", 
+            "//span[text()='Dismiss']//parent::button",
+            "//span[text()='Got it']//parent::button",
+            "//span[text()='OK']//parent::button",
+            "//span[text()='Done']//parent::button",
+            
+            # Generic modal dismissal
+            "//div[contains(@class, 'modal')]//button[contains(@class, 'close')]",
+            "//div[contains(@class, 'dialog')]//button[contains(@class, 'close')]"
         ]
         
+        overlay_dismissed = False
+        
+        # PRIORITY Method: Handle Google Console navigation tutorial first (most common blocker)
+        print("🎯 Checking for Google Console navigation tutorial overlay...")
+        try:
+            nav_tutorial_selectors = [
+                "//div[contains(@class, 'pcc-console-nav-circle') and contains(@class, 'show')]",
+                "//div[contains(@class, 'pcc-console-nav-circle-box')]",
+                "//button[@aria-label='Got it' and contains(@class, 'mat-primary')]"
+            ]
+            
+            for nav_selector in nav_tutorial_selectors:
+                try:
+                    nav_elements = driver.find_elements(By.XPATH, nav_selector)
+                    for nav_element in nav_elements:
+                        if nav_element.is_displayed():
+                            print(f"🚨 Found blocking navigation tutorial: {nav_element.get_attribute('class')}")
+                            
+                            # Look for "Got it" button within this tutorial
+                            try:
+                                got_it_button = nav_element.find_element(By.XPATH, ".//button[@aria-label='Got it']")
+                                if got_it_button.is_displayed():
+                                    driver.execute_script("arguments[0].click();", got_it_button)
+                                    print("✅ Dismissed navigation tutorial with 'Got it' button")
+                                    overlay_dismissed = True
+                                    time.sleep(1.0)
+                                    break
+                            except:
+                                # If no "Got it" button, try to remove the entire overlay
+                                try:
+                                    driver.execute_script("arguments[0].remove();", nav_element)
+                                    print("✅ Removed navigation tutorial overlay")
+                                    overlay_dismissed = True
+                                    time.sleep(0.5)
+                                    break
+                                except:
+                                    # Try clicking on the overlay to dismiss
+                                    try:
+                                        driver.execute_script("arguments[0].click();", nav_element)
+                                        print("✅ Dismissed navigation tutorial by clicking overlay")
+                                        overlay_dismissed = True
+                                        time.sleep(0.5)
+                                        break
+                                    except:
+                                        continue
+                    if overlay_dismissed:
+                        break
+                except Exception as nav_error:
+                    continue
+            
+            if overlay_dismissed:
+                print("✅ Google Console navigation tutorial dismissed successfully!")
+                return True
+        except Exception as nav_tutorial_error:
+            print(f"⚠️ Error handling navigation tutorial: {nav_tutorial_error}")
+        
+        # Method 1: Try to click close/dismiss buttons first
         for selector in overlay_selectors:
             try:
                 overlays = driver.find_elements(By.XPATH, selector)
                 for overlay in overlays:
-                    if overlay.is_displayed():
-                        # Try multiple methods to close the overlay
+                    if overlay.is_displayed() and overlay.is_enabled():
+                        overlay_text = overlay.text.strip() if hasattr(overlay, 'text') else ""
+                        aria_label = overlay.get_attribute("aria-label") or ""
+                        
+                        print(f"🎯 Found overlay element: {overlay_text[:50]}... (aria-label: {aria_label})")
+                        
+                        # Try multiple methods to dismiss
                         try:
-                            # Try clicking the close button if it exists
-                            close_buttons = driver.find_elements(By.XPATH, 
-                                f"{selector}//button[contains(@aria-label, 'Close')] | {selector}//cm-icon[contains(@data-icon-name, 'closeIcon')]/..")
-                            for close_btn in close_buttons:
-                                if close_btn.is_displayed():
-                                    driver.execute_script("arguments[0].click();", close_btn)
-                                    print("✅ Closed tooltip overlay via close button")
+                            # Method 1a: JavaScript click (most reliable)
+                            driver.execute_script("arguments[0].click();", overlay)
+                            print("✅ Dismissed overlay with JavaScript click")
+                            overlay_dismissed = True
+                            time.sleep(0.5)
+                            break
+                        except:
+                            try:
+                                # Method 1b: Regular click
+                                overlay.click()
+                                print("✅ Dismissed overlay with regular click")
+                                overlay_dismissed = True
+                                time.sleep(0.5)
+                                break
+                            except:
+                                try:
+                                    # Method 1c: Send Escape key to overlay
+                                    overlay.send_keys(Keys.ESCAPE)
+                                    print("✅ Dismissed overlay with Escape key")
+                                    overlay_dismissed = True
                                     time.sleep(0.5)
-                                    return True
-                        except:
-                            pass
-                        
-                        try:
-                            # Try to remove the overlay directly
-                            driver.execute_script("arguments[0].remove();", overlay)
-                            print("✅ Removed tooltip overlay via JavaScript")
-                            time.sleep(0.5)
-                            return True
-                        except:
-                            pass
-                        
-                        try:
-                            # Try to hide the overlay
-                            driver.execute_script("arguments[0].style.display = 'none';", overlay)
-                            print("✅ Hidden tooltip overlay via JavaScript")
-                            time.sleep(0.5)
-                            return True
-                        except:
-                            pass
-            except:
+                                    break
+                                except:
+                                    continue
+                if overlay_dismissed:
+                    break
+            except Exception as selector_error:
                 continue
+        
+        # Method 2: Try to remove backdrop overlays that block clicks (BE SELECTIVE)
+        if not overlay_dismissed:
+            print("🔧 Trying to remove blocking backdrop overlays (selective mode)...")
+            try:
+                # Find all backdrop elements
+                all_backdrops = driver.find_elements(By.CSS_SELECTOR, ".cdk-overlay-backdrop")
                 
-        # Try to remove any backdrop that might be blocking clicks
-        try:
-            backdrops = driver.find_elements(By.CLASS_NAME, "cdk-overlay-backdrop")
-            for backdrop in backdrops:
-                if backdrop.is_displayed():
-                    driver.execute_script("arguments[0].remove();", backdrop)
-                    print("✅ Removed blocking backdrop")
-                    time.sleep(0.5)
-                    return True
-        except:
-            pass
+                for backdrop in all_backdrops:
+                    if backdrop.is_displayed():
+                        # Check if this is a legitimate modal backdrop
+                        if is_legitimate_modal_backdrop(driver, backdrop):
+                            print("ℹ️ Skipping legitimate modal backdrop")
+                            continue
+                        
+                        # This appears to be a problematic tutorial backdrop - remove it
+                        try:
+                            print("🗑️ Removing problematic tutorial backdrop")
+                            driver.execute_script("arguments[0].remove();", backdrop)
+                            overlay_dismissed = True
+                            time.sleep(0.5)
+                            break
+                        except:
+                            continue
+                            
+            except Exception as backdrop_error:
+                print(f"⚠️ Error handling selective backdrop: {backdrop_error}")
+        
+        # Method 3: Try pressing Escape key to dismiss any active modal/overlay
+        if not overlay_dismissed:
+            print("⌨️ Trying Escape key to dismiss active overlays...")
+            try:
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                time.sleep(1.0)
+                print("✅ Sent Escape key to dismiss overlays")
+                overlay_dismissed = True
+            except Exception as escape_error:
+                print(f"⚠️ Escape key failed: {escape_error}")
+        
+        # Method 4: Check for specific Google Console tutorial patterns and dismiss
+        if not overlay_dismissed:
+            print("🔍 Checking for Google Console specific tutorial overlays...")
+            try:
+                # Look for tutorial walkthrough indicators
+                tutorial_indicators = [
+                    "//div[contains(text(), 'tutorial')]",
+                    "//div[contains(text(), 'tour')]", 
+                    "//div[contains(text(), 'walkthrough')]",
+                    "//div[contains(text(), 'Get started')]",
+                    "//div[contains(text(), 'Welcome to')]",
+                    "//div[contains(text(), 'New to Google Cloud')]"
+                ]
+                
+                for indicator_selector in tutorial_indicators:
+                    try:
+                        tutorial_elements = driver.find_elements(By.XPATH, indicator_selector)
+                        for tutorial_element in tutorial_elements:
+                            if tutorial_element.is_displayed():
+                                # Look for close button near this tutorial element
+                                try:
+                                    parent = tutorial_element.find_element(By.XPATH, "../..")
+                                    close_buttons = parent.find_elements(By.XPATH, ".//button[contains(@aria-label, 'Close') or contains(@aria-label, 'Skip')]")
+                                    for close_btn in close_buttons:
+                                        if close_btn.is_displayed():
+                                            driver.execute_script("arguments[0].click();", close_btn)
+                                            print("✅ Dismissed tutorial overlay")
+                                            overlay_dismissed = True
+                                            time.sleep(0.5)
+                                            break
+                                    if overlay_dismissed:
+                                        break
+                                except:
+                                    continue
+                        if overlay_dismissed:
+                            break
+                    except:
+                        continue
+            except Exception as tutorial_error:
+                print(f"⚠️ Error handling tutorial overlays: {tutorial_error}")
+        
+        # Method 5: Force remove any overlay containers that might still be blocking
+        if not overlay_dismissed:
+            print("🔧 Force removing persistent overlay containers...")
+            try:
+                force_remove_selectors = [
+                    ".cdk-overlay-container > *",
+                    ".cdk-global-overlay-wrapper",
+                    "[class*='overlay'][style*='z-index']",
+                    "[class*='tooltip'][style*='position: absolute']"
+                ]
+                
+                for remove_selector in force_remove_selectors:
+                    try:
+                        elements_to_remove = driver.find_elements(By.CSS_SELECTOR, remove_selector)
+                        for element in elements_to_remove:
+                            try:
+                                driver.execute_script("arguments[0].remove();", element)
+                                print("✅ Force removed overlay container")
+                                overlay_dismissed = True
+                            except:
+                                continue
+                    except:
+                        continue
+            except Exception as force_remove_error:
+                print(f"⚠️ Error force removing overlays: {force_remove_error}")
+        
+        if overlay_dismissed:
+            print("✅ Successfully dismissed overlay/tooltip")
+            time.sleep(1.0)  # Give UI time to settle
+            return True
+        else:
+            print("ℹ️ No overlays found to dismiss")
+            return False
             
-        return False
     except Exception as e:
         print(f"⚠️ Error while trying to dismiss overlay: {e}")
+        return False
+
+def is_legitimate_modal_backdrop(driver, backdrop_element):
+    """Check if a backdrop is part of a legitimate modal dialog"""
+    try:
+        # Check if this backdrop is associated with legitimate UI components
+        legitimate_modal_selectors = [
+            ".mat-mdc-dialog-container",     # Material dialog containers
+            "[role='dialog']",               # ARIA dialog elements
+            ".mat-select-panel",             # Material select dropdowns
+            ".cfc-switcher-panel",          # Google Cloud switcher panels
+            ".mat-autocomplete-panel",       # Autocomplete panels
+            ".mat-menu-panel",               # Menu panels
+            ".cdk-overlay-connected-position-bounding-box"  # Connected overlays
+        ]
+        
+        # Check if any legitimate modal is currently visible
+        for selector in legitimate_modal_selectors:
+            try:
+                modals = driver.find_elements(By.CSS_SELECTOR, selector)
+                for modal in modals:
+                    if modal.is_displayed():
+                        return True
+            except:
+                continue
+        
+        # Check if the backdrop has specific classes indicating it's legitimate
+        backdrop_classes = backdrop_element.get_attribute("class") or ""
+        
+        # These are legitimate backdrop patterns
+        legitimate_patterns = [
+            "cdk-overlay-backdrop-showing",    # Active modal backdrop
+            "cdk-overlay-dark-backdrop",       # Dark modal backdrop
+            "mat-overlay-backdrop"             # Material overlay backdrop
+        ]
+        
+        # If it has legitimate patterns AND no tutorial indicators, it's legitimate
+        has_legitimate_pattern = any(pattern in backdrop_classes for pattern in legitimate_patterns)
+        
+        # These patterns indicate tutorial/problematic overlays
+        tutorial_patterns = [
+            "tutorial", "walkthrough", "help", "nav-circle", "guide", "intro"
+        ]
+        
+        has_tutorial_pattern = any(pattern in backdrop_classes.lower() for pattern in tutorial_patterns)
+        
+        # Return True if it's a legitimate backdrop (has legitimate patterns but no tutorial patterns)
+        return has_legitimate_pattern and not has_tutorial_pattern
+        
+    except Exception as e:
+        # If we can't determine, assume it's legitimate to be safe
+        return True
+
+def dismiss_oauth_overview_navigation_tutorial(driver):
+    """
+    Specifically dismiss the navigation tutorial that appears on OAuth overview pages
+    Targets the exact elements that block clicks on auth/overview pages
+    """
+    try:
+        print("🎯 Targeting OAuth overview navigation tutorial blocking elements...")
+        
+        # Check current URL to confirm we're on OAuth overview page
+        current_url = driver.current_url
+        if "auth/overview" not in current_url:
+            print("ℹ️ Not on OAuth overview page, skipping specific tutorial dismissal")
+            return True
+            
+        print(f"📍 Confirmed on OAuth overview page: {current_url}")
+        
+        # PRIORITY: Target the exact blocking elements you provided
+        specific_blocking_elements = [
+            # The main navigation tutorial circle
+            "//div[contains(@class, 'pcc-console-nav-circle') and contains(@class, 'show')]",
+            "//div[@class='pcc-console-nav-circle show']",
+            
+            # The "Got it" button within the tutorial
+            "//button[@aria-label='Got it' and contains(@class, 'mat-primary')]",
+            "//button[contains(@aria-label, 'Got it') and contains(@class, 'mdc-button--unelevated')]",
+            "//span[text()='Got it']/parent::button",
+            "//span[normalize-space()='Got it']/parent::button",
+            
+            # The callout message about documentation search
+            "//p[@id='callout-message' and contains(@class, 'cfc-callout-message')]",
+            "//p[contains(@class, 'cfc-callout-message') and contains(text(), 'search for documentation')]",
+            "//p[contains(text(), 'You can now search for documentation')]",
+            "//p[contains(text(), 'tutorials and API keys')]",
+            
+            # Additional navigation tutorial selectors
+            "//div[contains(@class, 'pcc-console-nav-text')]",
+            "//div[contains(text(), 'Click on the menu at any time')]",
+            "//div[contains(@class, 'pcc-console-nav-subtitle')]"
+        ]
+        
+        elements_dismissed = 0
+        
+        # Method 1: Click "Got it" button first (most effective)
+        print("🎯 Method 1: Looking for 'Got it' button...")
+        for got_it_selector in [
+            "//button[@aria-label='Got it' and contains(@class, 'mat-primary')]",
+            "//button[contains(@aria-label, 'Got it')]",
+            "//span[text()='Got it']/parent::button",
+            "//span[normalize-space()='Got it']/parent::button",
+            "//button[.//span[text()='Got it']]",
+            "//button[.//span[normalize-space()='Got it']]"
+        ]:
+            try:
+                got_it_buttons = driver.find_elements(By.XPATH, got_it_selector)
+                for button in got_it_buttons:
+                    if button.is_displayed() and button.is_enabled():
+                        button_text = button.get_attribute('textContent') or button.text or ""
+                        if 'got it' in button_text.lower():
+                            print(f"✅ Found 'Got it' button: '{button_text.strip()}'")
+                            try:
+                                # Use JavaScript click to avoid interception
+                                driver.execute_script("arguments[0].click();", button)
+                                print("✅ Successfully clicked 'Got it' button")
+                                elements_dismissed += 1
+                                time.sleep(2.0)  # Wait for tutorial to dismiss
+                                break
+                            except Exception as click_error:
+                                print(f"⚠️ Could not click 'Got it' button: {click_error}")
+                                continue
+                if elements_dismissed > 0:
+                    break
+            except Exception as selector_error:
+                continue
+        
+        # Method 2: Remove specific blocking elements if "Got it" didn't work
+        if elements_dismissed == 0:
+            print("🎯 Method 2: Removing blocking elements directly...")
+            for element_selector in specific_blocking_elements:
+                try:
+                    blocking_elements = driver.find_elements(By.XPATH, element_selector)
+                    for element in blocking_elements:
+                        if element.is_displayed():
+                            element_classes = element.get_attribute("class") or ""
+                            element_text = (element.get_attribute("textContent") or element.text or "")[:100]
+                            print(f"🚨 Found blocking element: {element_classes}")
+                            print(f"   Text: '{element_text.strip()}'")
+                            
+                            # Try multiple removal methods
+                            removal_success = False
+                            
+                            # Method 2a: JavaScript removal
+                            try:
+                                driver.execute_script("arguments[0].remove();", element)
+                                print("✅ Removed blocking element with JavaScript")
+                                removal_success = True
+                                elements_dismissed += 1
+                            except:
+                                # Method 2b: Hide with CSS
+                                try:
+                                    driver.execute_script("arguments[0].style.display = 'none';", element)
+                                    print("✅ Hidden blocking element with CSS")
+                                    removal_success = True
+                                    elements_dismissed += 1
+                                except:
+                                    # Method 2c: Make invisible
+                                    try:
+                                        driver.execute_script("arguments[0].style.visibility = 'hidden';", element)
+                                        print("✅ Made blocking element invisible")
+                                        removal_success = True
+                                        elements_dismissed += 1
+                                    except:
+                                        pass
+                            
+                            if removal_success:
+                                time.sleep(0.5)  # Brief pause after each removal
+                except Exception as removal_error:
+                    continue
+        
+        # Method 3: Generic overlay dismissal as fallback
+        if elements_dismissed == 0:
+            print("🎯 Method 3: Generic overlay dismissal...")
+            dismiss_overlay(driver)
+            time.sleep(1)
+            elements_dismissed += 1
+        
+        if elements_dismissed > 0:
+            print(f"✅ Successfully dismissed {elements_dismissed} OAuth overview blocking elements")
+            time.sleep(2.0)  # Wait for UI to settle
+            return True
+        else:
+            print("⚠️ No OAuth overview blocking elements found or removed")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error dismissing OAuth overview navigation tutorial: {e}")
+        return False
+
+def dismiss_navigation_tutorial(driver):
+    """Specifically target and dismiss the Google Console navigation tutorial overlay"""
+    try:
+        print("🎯 Targeting Google Console navigation tutorial overlay...")
+        
+        # Look for the specific navigation tutorial elements (including OAuth overview specific ones)
+        nav_tutorial_selectors = [
+            # OAuth overview specific navigation tutorial elements (PRIORITY)
+            "//div[contains(@class, 'pcc-console-nav-circle') and contains(@class, 'show')]",
+            "//div[@class='pcc-console-nav-circle show']",
+            "//button[@aria-label='Got it' and contains(@class, 'mat-primary')]",
+            "//button[contains(@aria-label, 'Got it') and contains(@class, 'mdc-button--unelevated')]",
+            "//p[@id='callout-message' and contains(@class, 'cfc-callout-message')]",
+            "//p[contains(@class, 'cfc-callout-message') and contains(text(), 'search for documentation')]",
+            
+            # Generic navigation tutorial selectors
+            "//div[contains(@class, 'pcc-console-nav-circle-box')]",
+            "//div[contains(@class, 'pcc-console-nav-circle')]",
+            "//span[text()='Got it']/parent::button",
+            "//span[normalize-space()='Got it']/parent::button",
+            "//div[contains(@class, 'pcc-console-nav-text')]",
+            "//div[contains(text(), 'Click on the menu at any time')]"
+        ]
+        
+        for selector in nav_tutorial_selectors:
+            try:
+                elements = driver.find_elements(By.XPATH, selector)
+                for element in elements:
+                    if element.is_displayed():
+                        print(f"🚨 Found navigation tutorial element: {element.get_attribute('class')}")
+                        
+                        # If this is a "Got it" button, click it directly
+                        if element.tag_name == "button" and ("Got it" in element.get_attribute("aria-label") or "Got it" in element.text):
+                            try:
+                                driver.execute_script("arguments[0].click();", element)
+                                print("✅ Dismissed navigation tutorial with 'Got it' button")
+                                time.sleep(2.0)  # Wait longer after dismissing tutorial
+                                return True
+                            except:
+                                pass
+                        
+                        # Method 1: Look for "Got it" button within this element
+                        try:
+                            got_it_button = element.find_element(By.XPATH, ".//button[@aria-label='Got it']")
+                            if got_it_button.is_displayed():
+                                driver.execute_script("arguments[0].click();", got_it_button)
+                                print("✅ Dismissed navigation tutorial with nested 'Got it' button")
+                                time.sleep(2.0)
+                                return True
+                        except:
+                            pass
+                        
+                        # Method 2: Look for button with "Got it" text
+                        try:
+                            got_it_text_button = element.find_element(By.XPATH, ".//button[.//span[text()='Got it']]")
+                            if got_it_text_button.is_displayed():
+                                driver.execute_script("arguments[0].click();", got_it_text_button)
+                                print("✅ Dismissed navigation tutorial with 'Got it' text button")
+                                time.sleep(2.0)
+                                return True
+                        except:
+                            pass
+                        
+                        # Method 3: Try to remove the element if it's a container
+                        if "pcc-console-nav-circle" in element.get_attribute("class"):
+                            try:
+                                driver.execute_script("arguments[0].remove();", element)
+                                print("✅ Removed navigation tutorial overlay container")
+                                time.sleep(1.0)
+                                return True
+                            except:
+                                pass
+                        
+                        # Method 4: Try to hide the element
+                        try:
+                            driver.execute_script("arguments[0].style.display = 'none';", element)
+                            print("✅ Hidden navigation tutorial overlay")
+                            time.sleep(0.5)
+                            return True
+                        except:
+                            pass
+                        
+                        # Method 5: Try clicking the element to dismiss
+                        try:
+                            driver.execute_script("arguments[0].click();", element)
+                            print("✅ Dismissed navigation tutorial by clicking")
+                            time.sleep(0.5)
+                            return True
+                        except:
+                            continue
+            except Exception as selector_error:
+                continue
+        
+        # Look for "Got it" buttons independently with multiple approaches
+        try:
+            got_it_selectors = [
+                "//button[@aria-label='Got it']",
+                "//button[contains(@aria-label, 'Got it')]", 
+                "//button[.//span[text()='Got it']]",
+                "//button[.//span[normalize-space()='Got it']]",
+                "//span[text()='Got it']/parent::button",
+                "//span[normalize-space()='Got it']/parent::button"
+            ]
+            
+            for selector in got_it_selectors:
+                got_it_buttons = driver.find_elements(By.XPATH, selector)
+                for button in got_it_buttons:
+                    if button.is_displayed():
+                        driver.execute_script("arguments[0].click();", button)
+                        print("✅ Found and clicked standalone 'Got it' button")
+                        time.sleep(2.0)
+                        return True
+        except Exception as got_it_error:
+            pass
+
+        # Also look for and dismiss the console callout message with search documentation tip
+        try:
+            callout_selectors = [
+                "//p[@id='callout-message' and contains(@class, 'cfc-callout-message')]",
+                "//p[contains(@class, 'cfc-callout-message') and contains(text(), 'search for documentation')]",
+                "//*[contains(@class, 'cfc-callout') and contains(text(), 'documentation')]"
+            ]
+            
+            for selector in callout_selectors:
+                callout_elements = driver.find_elements(By.XPATH, selector)
+                for element in callout_elements:
+                    if element.is_displayed():
+                        driver.execute_script("arguments[0].remove();", element)
+                        print("✅ Removed console callout message")
+                        time.sleep(0.5)
+                        return True
+        except Exception as callout_error:
+            pass
+            
+        print("ℹ️ No navigation tutorial overlay found")
+        return False
+        
+    except Exception as e:
+        print(f"⚠️ Error dismissing navigation tutorial: {e}")
         return False
 
 def safe_click(driver, element, description="element"):
     """Safely click an element by first checking and dismissing any overlays"""
     try:
+        # PRIORITY: Check if this is a click interception due to legitimate modal backdrop
+        try:
+            # Check if there are legitimate modal dialogs open
+            legitimate_modals = driver.find_elements(By.CSS_SELECTOR, 
+                ".mat-mdc-dialog-container, [role='dialog'], .mat-select-panel, .cfc-switcher-panel")
+            
+            if any(modal.is_displayed() for modal in legitimate_modals):
+                print(f"ℹ️ Legitimate modal detected - skipping overlay dismissal for {description}")
+                # Try direct click first without dismissing legitimate modal backdrop
+                try:
+                    element.click()
+                    print(f"✅ Clicked {description} normally with modal present")
+                    return True
+                except Exception as modal_click_error:
+                    if "element click intercepted" in str(modal_click_error):
+                        # Only now try JavaScript click to bypass the backdrop
+                        try:
+                            driver.execute_script("arguments[0].click();", element)
+                            print(f"✅ Clicked {description} with JavaScript (modal backdrop bypass)")
+                            return True
+                        except Exception as js_error:
+                            print(f"❌ JavaScript click failed for {description}: {js_error}")
+                            return False
+                    else:
+                        print(f"❌ Error clicking {description}: {modal_click_error}")
+                        return False
+        except:
+            pass  # Continue with normal flow if modal check fails
+        
+        # Normal flow: Only check for tutorial overlays
+        print(f"🔍 Pre-checking for tutorial overlays before clicking {description}...")
+        dismiss_navigation_tutorial(driver)  # Only dismiss navigation tutorial, not modal backdrops
+        
         # First try normal click
         try:
             element.click()
@@ -109,26 +767,32 @@ def safe_click(driver, element, description="element"):
             return True
         except Exception as e:
             if "element click intercepted" in str(e) or "element not clickable" in str(e):
-                print(f"⚠️ Click intercepted, attempting to dismiss overlay...")
+                print(f"⚠️ Click intercepted on {description}, attempting enhanced overlay dismissal...")
                 
-                # Try to dismiss any overlays
-                dismiss_overlay(driver)
-                time.sleep(1)  # Wait for overlay to be dismissed
-                
-                # Try clicking again
-                try:
-                    element.click()
-                    print(f"✅ Clicked {description} after dismissing overlay")
-                    return True
-                except:
-                    # If still fails, try JavaScript click
+                # Try enhanced overlay dismissal multiple times
+                for attempt in range(2):  # Reduced from 3 to 2 attempts
+                    print(f"🔄 Overlay dismissal attempt {attempt + 1}/2...")
+                    dismiss_overlay(driver)  # Now uses selective backdrop removal
+                    time.sleep(1)  # Wait for overlay to be dismissed
+                    
+                    # Try clicking again after each dismissal attempt
                     try:
-                        driver.execute_script("arguments[0].click();", element)
-                        print(f"✅ Clicked {description} using JavaScript")
+                        element.click()
+                        print(f"✅ Clicked {description} after dismissing overlay (attempt {attempt + 1})")
                         return True
-                    except Exception as js_error:
-                        print(f"❌ Failed to click {description} even after dismissing overlay: {js_error}")
-                        return False
+                    except:
+                        if attempt < 1:  # Don't show error on final attempt
+                            print(f"⚠️ Click still intercepted, trying again...")
+                            continue
+                
+                # If regular click still fails after overlay dismissal, try JavaScript click
+                try:
+                    driver.execute_script("arguments[0].click();", element)
+                    print(f"✅ Clicked {description} with JavaScript after overlay dismissal")
+                    return True
+                except Exception as js_error:
+                    print(f"❌ JavaScript click also failed for {description}: {js_error}")
+                    return False
             else:
                 print(f"❌ Error clicking {description}: {e}")
                 return False
@@ -1027,9 +1691,344 @@ except ImportError as e:
 
 print("✅ All modules loaded successfully!")
 
+def handle_google_console_first_time_setup(driver):
+    """
+    Enhanced handler for Google Cloud Console first-time setup including:
+    - Country selection modal
+    - Terms of Service agreement
+    - Tutorial/walkthrough dismissal
+    - Navigation tutorial overlay dismissal
+    """
+    print("🏗️ Checking for Google Cloud Console first-time setup requirements...")
+    
+    try:
+        # First priority: Dismiss the navigation tutorial overlay that blocks clicks
+        print("🎯 PRIORITY: Checking for navigation tutorial overlay...")
+        nav_tutorial_dismissed = dismiss_navigation_tutorial(driver)
+        
+        # Wait a moment for any modals to appear after tutorial dismissal
+        time.sleep(random.uniform(3.0, 5.0))
+        
+        # Check for any first-time setup modals after dismissing navigation tutorial
+        setup_completed = False
+        
+        # Method 1: Look for country selection modal
+        print("🌍 Checking for country selection modal...")
+        modal_found = False
+        
+        # Enhanced modal detection selectors
+        modal_selectors = [
+            # Material Design dialog containers
+            ".mat-mdc-dialog-content",
+            ".mat-dialog-container", 
+            ".cdk-overlay-container [role='dialog']",
+            "mat-dialog-container",
+            
+            # Google Cloud specific modal patterns
+            ".console-dialog",
+            ".console-modal",
+            ".gcp-modal",
+            
+            # Generic modal patterns
+            "[role='dialog']",
+            ".modal-content",
+            ".dialog-content"
+        ]
+        
+        modal_element = None
+        for selector in modal_selectors:
+            try:
+                modals = driver.find_elements(By.CSS_SELECTOR, selector)
+                for modal in modals:
+                    if modal.is_displayed():
+                        modal_text = modal.text.lower()
+                        
+                        # Check for first-time setup indicators
+                        setup_indicators = [
+                            "welcome" in modal_text and ("google cloud" in modal_text or "console" in modal_text),
+                            "country" in modal_text and ("select" in modal_text or "residence" in modal_text),
+                            "terms of service" in modal_text and "google cloud" in modal_text,
+                            "create and manage projects" in modal_text,
+                            "get started" in modal_text and "google cloud" in modal_text,
+                            "setup" in modal_text and "console" in modal_text,
+                            "first time" in modal_text,
+                            "new to google cloud" in modal_text
+                        ]
+                        
+                        if any(setup_indicators):
+                            print(f"🎯 First-time setup modal detected!")
+                            print(f"📝 Modal content: {modal_text[:200]}...")
+                            modal_found = True
+                            modal_element = modal
+                            break
+                
+                if modal_found:
+                    break
+            except Exception as selector_error:
+                continue
+        
+        if modal_found and modal_element:
+            print("🚀 Handling first-time setup modal...")
+            
+            # Step 1: Handle country selection
+            print("🌍 Looking for country selection dropdown...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            country_dropdown_selectors = [
+                # Material Design select components
+                ".mat-mdc-select-trigger",
+                ".mat-select-trigger",
+                "mat-select[formcontrolname='country']",
+                "mat-select[formcontrolname='optInCountry']",
+                ".mat-mdc-form-field-type-mat-select",
+                
+                # Google Cloud specific selectors
+                "cfc-select[formcontrolname='optInCountry']",
+                "cfc-select[aria-labelledby*='country']",
+                ".cfc-select",
+                
+                # Generic dropdown patterns
+                "[role='combobox'][aria-haspopup='listbox']",
+                "[role='combobox']",
+                "select[name*='country']"
+            ]
+            
+            country_dropdown = None
+            for selector in country_dropdown_selectors:
+                try:
+                    dropdowns = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for dropdown in dropdowns:
+                        if dropdown.is_displayed() and dropdown.is_enabled():
+                            country_dropdown = dropdown
+                            print(f"✅ Found country dropdown with selector: {selector}")
+                            break
+                    if country_dropdown:
+                        break
+                except Exception:
+                    continue
+            
+            if country_dropdown:
+                print("🖱️ Opening country dropdown...")
+                try:
+                    # Scroll to dropdown and ensure it's visible
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", country_dropdown)
+                    time.sleep(random.uniform(0.5, 1.0))
+                    
+                    # Use safe_click to handle any overlays
+                    if safe_click(driver, country_dropdown, "country dropdown"):
+                        time.sleep(random.uniform(1.0, 2.0))
+                        
+                        # Look for Austria in dropdown options
+                        print("🔍 Looking for Austria in country options...")
+                        austria_selectors = [
+                            # Material Design options
+                            "//mat-option[contains(.//span, 'Austria')]",
+                            "//mat-option[contains(text(), 'Austria')]",
+                            "//div[contains(@class, 'mat-option') and contains(text(), 'Austria')]",
+                            "//span[contains(text(), 'Austria')]//parent::mat-option",
+                            
+                            # Google Cloud specific options
+                            "//cfc-option[contains(text(), 'Austria')]",
+                            "//div[contains(@class, 'cfc-option') and contains(text(), 'Austria')]",
+                            
+                            # Generic option patterns
+                            "//*[contains(text(), 'Austria') and (contains(@class, 'option') or contains(@role, 'option'))]"
+                        ]
+                        
+                        austria_option = None
+                        for selector in austria_selectors:
+                            try:
+                                austria_option = WebDriverWait(driver, 3).until(
+                                    EC.element_to_be_clickable((By.XPATH, selector))
+                                )
+                                print(f"✅ Found Austria option with selector: {selector}")
+                                break
+                            except TimeoutException:
+                                continue
+                        
+                        if austria_option:
+                            print("🇦🇹 Selecting Austria...")
+                            if safe_click(driver, austria_option, "Austria option"):
+                                print("✅ Austria selected successfully!")
+                            else:
+                                print("⚠️ Failed to select Austria, continuing with default...")
+                        else:
+                            print("⚠️ Austria not found in options, using default selection...")
+                    else:
+                        print("⚠️ Failed to open country dropdown")
+                except Exception as dropdown_error:
+                    print(f"⚠️ Error handling country dropdown: {dropdown_error}")
+            else:
+                print("ℹ️ No country dropdown found in modal")
+            
+            # Step 2: Handle Terms of Service agreement checkbox
+            print("☑️ Looking for Terms of Service agreement checkbox...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            checkbox_selectors = [
+                # Material Design checkbox patterns
+                "input[type='checkbox'].mat-mdc-checkbox-input",
+                ".mdc-checkbox__native-control",
+                "input[type='checkbox'][id*='checkbox']",
+                "mat-checkbox input[type='checkbox']",
+                
+                # Google Cloud specific patterns
+                "input[type='checkbox'][formcontrolname*='agree']",
+                "input[type='checkbox'][formcontrolname*='terms']",
+                "input[type='checkbox'][formcontrolname*='consent']",
+                
+                # Generic checkbox patterns
+                "input[type='checkbox']"
+            ]
+            
+            agreement_checkbox = None
+            for selector in checkbox_selectors:
+                try:
+                    checkboxes = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for checkbox in checkboxes:
+                        if checkbox.is_displayed() and checkbox.is_enabled():
+                            # Check if this checkbox is related to terms/agreement
+                            parent_text = ""
+                            try:
+                                # Check text in parent elements
+                                for parent_level in range(1, 4):
+                                    parent_xpath = "/".join([".."] * parent_level)
+                                    parent = checkbox.find_element(By.XPATH, parent_xpath)
+                                    parent_text += " " + (parent.text or "").lower()
+                            except:
+                                pass
+                            
+                            # Look for agreement-related keywords
+                            agreement_keywords = ["agree", "terms", "accept", "consent", "service", "privacy"]
+                            if any(keyword in parent_text for keyword in agreement_keywords):
+                                agreement_checkbox = checkbox
+                                print(f"✅ Found agreement checkbox with selector: {selector}")
+                                print(f"📝 Related text: {parent_text.strip()[:100]}...")
+                                break
+                    if agreement_checkbox:
+                        break
+                except Exception:
+                    continue
+            
+            if agreement_checkbox:
+                # Check if checkbox is already checked
+                is_checked = agreement_checkbox.is_selected()
+                if not is_checked:
+                    print("☑️ Checking Terms of Service agreement...")
+                    try:
+                        # Scroll to checkbox
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", agreement_checkbox)
+                        time.sleep(random.uniform(0.5, 1.0))
+                        
+                        # Use safe_click to handle overlays
+                        if safe_click(driver, agreement_checkbox, "Terms agreement checkbox"):
+                            print("✅ Terms of Service agreement checked!")
+                        else:
+                            print("⚠️ Failed to check Terms agreement")
+                    except Exception as checkbox_error:
+                        print(f"⚠️ Error checking agreement checkbox: {checkbox_error}")
+                else:
+                    print("✅ Terms of Service agreement already checked!")
+            else:
+                print("ℹ️ No Terms of Service agreement checkbox found")
+            
+            # Step 3: Look for and click Continue/Accept button
+            print("➡️ Looking for Continue/Accept button in modal...")
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            continue_selectors = [
+                # Text-based button selection
+                "//button[contains(.//span, 'Continue')]",
+                "//button[contains(.//span, 'Accept')]",
+                "//button[contains(.//span, 'Agree')]", 
+                "//button[contains(.//span, 'Get started')]",
+                "//button[contains(.//span, 'Start')]",
+                "//span[contains(text(), 'Continue')]//parent::button",
+                "//span[contains(text(), 'Accept')]//parent::button",
+                "//span[contains(text(), 'Agree')]//parent::button",
+                
+                # Button attribute patterns
+                "button[type='submit']",
+                ".mat-primary button",
+                ".mdc-button--unelevated",
+                ".mdc-button--raised",
+                
+                # Generic button patterns in modal
+                ".mat-mdc-dialog-actions button",
+                "mat-dialog-actions button"
+            ]
+            
+            continue_button = None
+            for selector in continue_selectors:
+                try:
+                    if selector.startswith("//"):
+                        buttons = driver.find_elements(By.XPATH, selector)
+                    else:
+                        buttons = driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for button in buttons:
+                        if button.is_displayed() and button.is_enabled():
+                            button_text = (button.text or "").lower()
+                            # Look for action keywords
+                            action_keywords = ["continue", "accept", "agree", "start", "get started", "submit"]
+                            if any(keyword in button_text for keyword in action_keywords) or button_text == "":
+                                continue_button = button
+                                print(f"✅ Found continue button: '{button.text}' with selector: {selector}")
+                                break
+                    if continue_button:
+                        break
+                except Exception:
+                    continue
+            
+            if continue_button:
+                print("✅ Clicking Continue/Accept button...")
+                try:
+                    # Scroll to button
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", continue_button)
+                    time.sleep(random.uniform(0.5, 1.0))
+                    
+                    # Use safe_click to handle overlays
+                    if safe_click(driver, continue_button, "Continue/Accept button"):
+                        print("✅ First-time setup modal completed!")
+                        time.sleep(random.uniform(2.0, 4.0))  # Wait for modal to close and page to load
+                        setup_completed = True
+                    else:
+                        print("⚠️ Failed to click Continue/Accept button")
+                except Exception as button_error:
+                    print(f"⚠️ Error clicking Continue button: {button_error}")
+            else:
+                print("⚠️ Could not find Continue/Accept button, trying to close modal...")
+                # Try pressing Escape to close modal
+                try:
+                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                    time.sleep(random.uniform(1.0, 2.0))
+                    print("✅ Closed modal with Escape key")
+                    setup_completed = True
+                except:
+                    print("⚠️ Could not close modal")
+        else:
+            print("ℹ️ No first-time setup modal detected")
+            
+        # Method 2: Check for any tutorial overlays or product tours after modal handling
+        print("🔍 Checking for tutorial overlays and product tours...")
+        dismiss_overlay(driver)
+        
+        return setup_completed or nav_tutorial_dismissed  # Return true if any setup was completed
+        
+    except Exception as setup_error:
+        print(f"⚠️ Error handling first-time setup: {setup_error}")
+        print("💡 Continuing with automation - manual setup may be required")
+        return False
+
 def configure_audience(driver):
     """Configure OAuth consent screen audience with test user"""
     print("👥 Proceeding to Audience configuration...")
+    
+    # CRITICAL: Dismiss navigation tutorial overlay before any interaction
+    print("🎯 PRIORITY: Dismissing navigation tutorial overlay before audience configuration...")
+    dismiss_navigation_tutorial(driver)
+    time.sleep(1.0)  # Wait for dismissal to complete
+    
     try:
         # Check for CAPTCHAs before proceeding
         if not wait_for_page_load_and_check_captcha(driver):
@@ -1300,78 +2299,23 @@ def find_element_by_selectors(driver, selectors, element_name):
     return None
 
 def click_element(driver, element, element_name):
-    """Click an element with fallback strategies and overlay handling"""
+    """Click an element with enhanced overlay handling using safe_click"""
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(random.uniform(1.0, 2.0))
     
-    try:
-        human_mouse_move_to(element)
-        element.click()
-        print(f"✅ {element_name} clicked successfully!")
-        time.sleep(random.uniform(0.5, 1.0))  # Reduced wait time for clicks
-        return True
-    except ElementClickInterceptedException as intercept_error:
-        print(f"⚠️ Click intercepted by overlay: {intercept_error}")
-        print("🔧 Attempting to handle overlay interference...")
-        
-        # Try to dismiss any overlays that might be blocking
-        try:
-            # Look for and dismiss overlay elements
-            overlay_selectors = [
-                "div.cfc-sub-task-leftpane",
-                "div[role='presentation']", 
-                ".cdk-overlay-backdrop",
-                ".mat-overlay-backdrop",
-                ".cfc-overlay",
-                "[class*='overlay']",
-                "[class*='backdrop']"
-            ]
-            
-            for overlay_selector in overlay_selectors:
-                overlays = driver.find_elements(By.CSS_SELECTOR, overlay_selector)
-                for overlay in overlays:
-                    if overlay.is_displayed():
-                        print(f"🔧 Found blocking overlay: {overlay_selector}")
-                        try:
-                            # Try to hide the overlay
-                            driver.execute_script("arguments[0].style.display = 'none';", overlay)
-                            print("✅ Overlay hidden successfully")
-                        except:
-                            pass
-            
-            time.sleep(random.uniform(0.5, 1.0))
-        except Exception as overlay_error:
-            print(f"⚠️ Overlay handling failed: {overlay_error}")
-        
-        # Try JavaScript click after overlay handling
-        try:
-            driver.execute_script("arguments[0].click();", element)
-            print(f"✅ {element_name} clicked successfully with JavaScript after overlay handling!")
-            time.sleep(random.uniform(0.5, 1.0))
-            return True
-        except Exception as js_click_error:
-            print(f"⚠️ JavaScript click failed: {js_click_error}")
+    # Use our enhanced safe_click function
+    success = safe_click(driver, element, element_name)
     
-    except Exception as click_error:
-        print(f"⚠️ Regular click failed: {click_error}")
+    if success:
+        time.sleep(random.uniform(0.5, 1.0))  # Wait time after successful click
+        return True
+    else:
+        print(f"❌ All click attempts failed for {element_name}")
         
-        # Check for CAPTCHA if click failed
-        print("🔍 Checking if CAPTCHA is blocking interaction...")
-        if not detect_and_handle_captcha(driver):
-            print("⚠️ CAPTCHA may be blocking interaction")
-        
-        try:
-            driver.execute_script("arguments[0].click();", element)
-            print(f"✅ {element_name} clicked successfully with JavaScript!")
-            time.sleep(random.uniform(0.5, 1.0))  # Reduced wait time for clicks
-            return True
-        except Exception as js_click_error:
-            print(f"❌ JavaScript click also failed: {js_click_error}")
-            
-            # Final CAPTCHA check
-            print("🔍 Final CAPTCHA check before giving up...")
-            detect_and_handle_captcha(driver)
-            return False
+        # Final CAPTCHA check
+        print("🔍 Final CAPTCHA check before giving up...")
+        detect_and_handle_captcha(driver)
+        return False
 
 def fill_email_and_save(driver):
     """Fill email input field and save"""
@@ -4673,6 +5617,164 @@ def recover_session_if_needed(driver):
             print(f"⚠️ Unexpected session error: {session_error}")
             return False, driver
 
+def handle_google_recovery_options(driver):
+    """
+    Handle Google Recovery Options page that appears for newly created Gmail accounts
+    
+    This page asks users to add recovery phone/email with URL pattern:
+    https://gds.google.com/web/recoveryoptions?cardIndex=0&hl=en-GB&authuser=0...
+    
+    Args:
+        driver: Selenium WebDriver instance
+    
+    Returns:
+        bool: True if recovery options were skipped successfully
+    """
+    try:
+        print("📱 Handling Google Recovery Options page...")
+        
+        current_url = driver.current_url
+        if "gds.google.com/web/recoveryoptions" not in current_url:
+            print("ℹ️ Not on recovery options page")
+            return True
+            
+        print(f"📍 Confirmed on recovery options page: {current_url}")
+        
+        # First, try to dismiss any overlays that might be blocking interactions
+        print("🚫 Dismissing any overlays on recovery options page...")
+        dismiss_overlay(driver)
+        time.sleep(2)
+        
+        # Look for skip buttons and options to bypass recovery setup
+        skip_selectors = [
+            # Skip or "Not now" buttons
+            "//button[contains(text(), 'Skip')]",
+            "//button[contains(text(), 'Not now')]", 
+            "//button[contains(text(), 'Maybe later')]",
+            "//button[contains(text(), 'Ask me later')]",
+            "//button[contains(text(), 'Continue without')]",
+            "//button[contains(text(), 'Skip for now')]",
+            "//button[contains(text(), 'Later')]",
+            "//button[contains(text(), 'Done')]",
+            "//button[contains(text(), 'Continue')]",
+            
+            # Links with skip text
+            "//a[contains(text(), 'Skip')]",
+            "//a[contains(text(), 'Not now')]",
+            "//a[contains(text(), 'Continue without')]",
+            "//a[contains(text(), 'Maybe later')]",
+            
+            # Span elements within buttons
+            "//span[contains(text(), 'Skip')]/parent::button",
+            "//span[contains(text(), 'Not now')]/parent::button",
+            "//span[contains(text(), 'Maybe later')]/parent::button",
+            "//span[contains(text(), 'Continue')]/parent::button",
+            "//span[contains(text(), 'Done')]/parent::button",
+            
+            # Close or X buttons
+            "//button[@aria-label='Close']",
+            "//button[@aria-label='Skip']",
+            "//button[contains(@class, 'close')]",
+            "//*[@role='button'][contains(@aria-label, 'close')]",
+            
+            # Generic skip patterns
+            "//*[contains(@class, 'skip')]//button",
+            "//*[contains(@class, 'later')]//button",
+            "//*[contains(@data-action, 'skip')]"
+        ]
+        
+        skip_success = False
+        for skip_selector in skip_selectors:
+            try:
+                skip_elements = driver.find_elements(By.XPATH, skip_selector)
+                for skip_element in skip_elements:
+                    if skip_element.is_displayed() and skip_element.is_enabled():
+                        element_text = skip_element.get_attribute('textContent') or skip_element.text or ""
+                        print(f"🔍 Found potential skip option: '{element_text.strip()}'")
+                        
+                        # Click the skip element
+                        try:
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", skip_element)
+                            time.sleep(1)
+                            skip_element.click()
+                            print(f"✅ Successfully clicked skip option: '{element_text.strip()}'")
+                            time.sleep(random.uniform(2.0, 4.0))
+                            
+                            # Check if we left the recovery options page
+                            new_url = driver.current_url
+                            if "gds.google.com/web/recoveryoptions" not in new_url:
+                                print(f"✅ Successfully left recovery options page, now at: {new_url}")
+                                skip_success = True
+                                break
+                            else:
+                                print("ℹ️ Still on recovery options page, trying next option...")
+                        except Exception as click_error:
+                            print(f"⚠️ Could not click skip option: {click_error}")
+                            continue
+                
+                if skip_success:
+                    break
+            except Exception as selector_error:
+                continue
+        
+        # If skip buttons didn't work, try to navigate away directly
+        if not skip_success:
+            print("🔗 No skip options found, trying to navigate directly to Cloud Console...")
+            
+            # Try to navigate directly to Google Cloud Console
+            console_urls = [
+                "https://console.cloud.google.com/",
+                "https://console.cloud.google.com/home",
+                "https://console.cloud.google.com/projectselector"
+            ]
+            
+            for console_url in console_urls:
+                try:
+                    print(f"🔗 Attempting direct navigation to: {console_url}")
+                    driver.get(console_url)
+                    time.sleep(random.uniform(3.0, 5.0))
+                    
+                    new_url = driver.current_url
+                    if "console.cloud.google.com" in new_url:
+                        print(f"✅ Successfully navigated to Cloud Console: {new_url}")
+                        skip_success = True
+                        break
+                    else:
+                        print(f"⚠️ Navigation failed, current URL: {new_url}")
+                        
+                except Exception as nav_error:
+                    print(f"⚠️ Direct navigation failed: {nav_error}")
+                    continue
+        
+        # If direct navigation didn't work, try pressing Escape or other dismissal methods
+        if not skip_success:
+            print("⌨️ Trying keyboard shortcuts to dismiss recovery options...")
+            try:
+                # Try pressing Escape key
+                body = driver.find_element(By.TAG_NAME, "body")
+                body.send_keys(Keys.ESCAPE)
+                time.sleep(2)
+                
+                new_url = driver.current_url
+                if "gds.google.com/web/recoveryoptions" not in new_url:
+                    print("✅ Escape key successfully dismissed recovery options")
+                    skip_success = True
+                    
+            except Exception as key_error:
+                print(f"⚠️ Keyboard shortcut failed: {key_error}")
+        
+        if skip_success:
+            print("✅ Successfully handled Google Recovery Options page!")
+            return True
+        else:
+            print("⚠️ Could not automatically handle recovery options page")
+            print("💡 You may need to manually skip the recovery setup")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error handling Google Recovery Options: {e}")
+        return False
+
 def handle_google_verifications(driver, context="general"):
     """
     Comprehensive handler for all types of Google verification prompts with session recovery
@@ -4734,7 +5836,9 @@ def handle_google_verifications(driver, context="general"):
                 ],
                 'recovery': [
                     'account recovery required', 'reset your password', 'recover your account',
-                    'answer security questions', 'use recovery email', 'use recovery phone'
+                    'answer security questions', 'use recovery email', 'use recovery phone',
+                    'add a recovery phone', 'add a recovery email', 'make sure that you can always sign in',
+                    'your recovery info is used to reach you', 'add recovery phone', 'add recovery email'
                 ],
                 'captcha': [
                     'prove you\'re not a robot', 'verify you\'re human', 'complete captcha',
@@ -4758,7 +5862,12 @@ def handle_google_verifications(driver, context="general"):
             is_normal_page = any(page in current_url or page in page_title.lower() or page in page_source 
                                for page in normal_google_pages)
             
-            if is_normal_page:
+            # CRITICAL: Always check for recovery options regardless of normal page classification
+            if "gds.google.com/web/recoveryoptions" in current_url:
+                print("📱 PRIORITY: Recovery options page detected - overriding normal page classification!")
+                is_normal_page = False
+                explicit_verification_found = True
+            elif is_normal_page:
                 # Only proceed with verification detection if there are explicit verification prompts
                 explicit_verification_found = False
                 for v_type, indicators in verification_indicators.items():
@@ -4778,7 +5887,12 @@ def handle_google_verifications(driver, context="general"):
             
             # Check if any verification is detected (but only if not on normal page or explicit verification found)
             verification_type = None
-            if not is_normal_page or explicit_verification_found:
+            
+            # First, check for specific URL patterns that indicate certain verification types
+            if "gds.google.com/web/recoveryoptions" in current_url:
+                verification_type = "recovery"
+                print("📱 Recovery options page detected by URL pattern!")
+            elif not is_normal_page or explicit_verification_found:
                 for v_type, indicators in verification_indicators.items():
                     verification_found = False
                     for indicator in indicators:
@@ -4861,6 +5975,14 @@ def handle_google_verifications(driver, context="general"):
                 print("Please solve the CAPTCHA manually and press Enter to continue...")
                 input("🤖 Press Enter after solving CAPTCHA...")
                 verification_handled = True
+            
+            elif verification_type == 'recovery':
+                print("📱 Google Recovery Options page detected - handling automatically...")
+                verification_handled = handle_google_recovery_options(driver)
+                if verification_handled:
+                    print("✅ Successfully handled recovery options page!")
+                else:
+                    print("⚠️ Could not automatically handle recovery options, may need manual intervention")
             
             # If automatic methods didn't work, prompt for manual intervention
             if not verification_handled:
@@ -5711,7 +6833,7 @@ try:
         
         # Execute enhanced 2FA handling
         try:
-            verification_result = handle_2fa_and_verification()
+            verification_result = handle_2fa_and_verification(driver)
             if not verification_result:
                 print("❌ 2FA/Verification handling failed")
                 raise Exception("2FA verification could not be completed")
@@ -5748,459 +6870,9 @@ try:
     print("🔍 Checking for 2FA setup popup after login...")
     handle_2fa_popup(driver)
     
-    # Step 3: Handle any remaining verifications or terms of service
-    
-    def handle_2fa_and_verification():
-        """Enhanced handler for Google 2FA and phone verification scenarios"""
-        print("🔐 Enhanced 2FA and verification handling...")
-        
-        max_verification_attempts = 3
-        for attempt in range(max_verification_attempts):
-            try:
-                print(f"🔍 2FA check attempt {attempt + 1}/{max_verification_attempts}")
-                
-                # Wait for page to stabilize
-                time.sleep(random.uniform(2.0, 4.0))
-                
-                # Check current page state
-                current_url = driver.current_url.lower()
-                page_title = driver.title.lower()
-                
-                try:
-                    page_text = driver.page_source.lower()
-                except Exception as page_error:
-                    print(f"⚠️ Could not get page source: {page_error}")
-                    # Try to refresh and continue
-                    try:
-                        driver.refresh()
-                        time.sleep(random.uniform(3.0, 5.0))
-                        page_text = driver.page_source.lower()
-                    except:
-                        page_text = ""
-                
-                print(f"📍 Current URL: {current_url}")
-                print(f"📄 Page title: {page_title}")
-                
-                # Enhanced 2FA detection patterns
-                verification_indicators = [
-                    # 2-Step Verification specific
-                    "2-step verification", "two-step verification", "2fa", "two-factor",
-                    "verify it's you", "verify it's really you", "make sure it's really you",
-                    "check your", "tap yes", "notification", "device notification",
-                    "sent a notification", "google sent a notification",
-                    
-                    # Phone verification
-                    "verify your phone", "phone verification", "verify phone number",
-                    "enter your phone", "phone number verification", "add phone number",
-                    
-                    # General verification
-                    "verify your identity", "confirm your identity", "prove it's you",
-                    "unusual activity", "suspicious activity", "security check",
-                    "protect your account", "account security", "verify this sign-in",
-                    
-                    # Specific 2FA prompts
-                    "redmi note", "check your redmi", "tap yes on the notification",
-                    "don't ask again on this device", "help keep your account safe"
-                ]
-                
-                # Check if we're on a verification page
-                verification_detected = any(indicator in current_url or indicator in page_text or indicator in page_title 
-                                          for indicator in verification_indicators)
-                
-                if verification_detected:
-                    print("🚨 2FA/Verification screen detected!")
-                    print(f"🔍 Detected indicators in: URL, page content, or title")
-                    
-                    # Enhanced approach for different verification types
-                    
-                    # Type 1: Device notification (like "Check your Redmi Note 10")
-                    if any(device in page_text for device in ["redmi", "device", "notification", "tap yes"]):
-                        print("📱 Device notification verification detected!")
-                        print("="*60)
-                        print("🔔 DEVICE NOTIFICATION VERIFICATION")
-                        print("="*60)
-                        print("📋 Google has sent a notification to your device")
-                        print("🎯 WHAT TO DO:")
-                        print("   1. Check your phone/device for a Google notification")
-                        print("   2. Tap 'Yes' or 'Allow' on the notification")
-                        print("   3. If no notification, try refreshing or checking other devices")
-                        print("")
-                        print("📱 Common devices that receive notifications:")
-                        print("   • Your primary phone (Android/iPhone)")
-                        print("   • Tablets with your Google account")
-                        print("   • Other computers with Chrome signed in")
-                        print("")
-                        print("⏰ Waiting for you to approve the notification...")
-                        
-                        # Give user time to handle device notification
-                        verification_timeout = 120  # 2 minutes
-                        start_time = time.time()
-                        
-                        while (time.time() - start_time) < verification_timeout:
-                            try:
-                                # Check every 5 seconds if verification is complete
-                                time.sleep(5.0)
-                                
-                                # Test if we're still on verification page
-                                current_url_check = driver.current_url.lower()
-                                
-                                # If URL changed significantly, verification might be complete
-                                if "accounts.google.com" not in current_url_check or "challenge" not in current_url_check:
-                                    print("✅ Device verification appears to be completed!")
-                                    return True
-                                
-                                # Look for success indicators
-                                try:
-                                    success_elements = driver.find_elements(By.XPATH, 
-                                        "//div[contains(text(), 'verified')] | //div[contains(text(), 'success')] | //div[contains(text(), 'approved')]")
-                                    if success_elements:
-                                        print("✅ Verification success detected!")
-                                        return True
-                                except:
-                                    pass
-                                
-                                print(f"⏳ Still waiting... ({int(time.time() - start_time)}s/{verification_timeout}s)")
-                                
-                            except Exception as check_error:
-                                print(f"⚠️ Error checking verification status: {check_error}")
-                                # If we get session errors, try to recover
-                                if "invalid session" in str(check_error).lower():
-                                    print("🔄 Session error detected, attempting recovery...")
-                                    time.sleep(3.0)
-                                    try:
-                                        # Try to refresh the page
-                                        driver.refresh()
-                                        time.sleep(5.0)
-                                        return True  # Assume verification completed after refresh
-                                    except:
-                                        print("❌ Session recovery failed, continuing anyway...")
-                                        return True
-                        
-                        # If timeout reached, ask user for manual confirmation
-                        print("⏰ Verification timeout reached")
-                        user_input = input("📱 Did you approve the device notification? (y/n/skip): ").strip().lower()
-                        
-                        if user_input in ['y', 'yes']:
-                            print("✅ User confirmed device verification completed")
-                            return True
-                        elif user_input in ['skip', 's']:
-                            print("⚠️ Skipping device verification - may cause issues later")
-                            return True
-                        else:
-                            print("❌ Device verification not completed")
-                            return False
-                    
-                    # Type 2: Phone number verification
-                    elif any(phone in page_text for phone in ["phone number", "verify your phone", "enter your phone"]):
-                        print("📞 Phone number verification detected!")
-                        return handle_phone_number_verification(driver)
-                    
-                    # Type 3: SMS/Code verification
-                    elif any(code in page_text for code in ["enter the code", "verification code", "6-digit", "text message"]):
-                        print("💬 SMS/Code verification detected!")
-                        return handle_sms_code_verification(driver)
-                    
-                    # Type 4: General 2FA
-                    else:
-                        print("🔐 General 2FA verification detected!")
-                        return handle_general_2fa(driver)
-                
-                else:
-                    print("✅ No 2FA/verification detected")
-                    return True
-                    
-            except Exception as verification_error:
-                print(f"⚠️ Error during 2FA check attempt {attempt + 1}: {verification_error}")
-                
-                # Handle session errors specifically
-                if "invalid session" in str(verification_error).lower():
-                    print("🔄 Session disconnection detected during 2FA check")
-                    print("💡 This often happens when 2FA takes too long")
-                    print("🔧 Attempting session recovery...")
-                    
-                    try:
-                        # Try to get a new driver instance
-                        print("🔄 Attempting to recover session...")
-                        time.sleep(3.0)
-                        
-                        # Check if browser is still running
-                        try:
-                            driver.current_url
-                            print("✅ Browser session is still active")
-                        except:
-                            print("❌ Browser session lost, but continuing...")
-                            return True  # Assume 2FA was completed
-                            
-                    except Exception as recovery_error:
-                        print(f"⚠️ Session recovery failed: {recovery_error}")
-                        if attempt == max_verification_attempts - 1:
-                            print("⚠️ Assuming 2FA was completed and continuing...")
-                            return True
-                
-                # For other errors, continue with retry
-                if attempt < max_verification_attempts - 1:
-                    print(f"🔄 Retrying 2FA check in 3 seconds...")
-                    time.sleep(3.0)
-                else:
-                    print("⚠️ Max 2FA attempts reached, continuing anyway...")
-                    return True
-        
-        return True  # Default to success if no issues detected
-    
-    def handle_phone_number_verification(driver):
-        """Handle phone number entry verification"""
-        print("📞 Phone number verification handler...")
-        # Implementation for phone number verification
-        print("💡 Manual intervention required for phone number verification")
-        print("Please complete the phone verification manually and press Enter to continue...")
-        input("📞 Press Enter after completing phone verification...")
-        return True
-    
-    def handle_sms_code_verification(driver):
-        """Handle SMS code verification"""
-        print("💬 SMS code verification handler...")
-        # Implementation for SMS code verification
-        print("💡 Manual intervention required for SMS code verification")
-        print("Please enter the SMS code manually and press Enter to continue...")
-        input("💬 Press Enter after entering SMS code...")
-        return True
-    
-    def handle_general_2fa(driver):
-        """Handle general 2FA scenarios"""
-        print("🔐 General 2FA handler...")
-        print("💡 Manual intervention required for 2FA")
-        print("Please complete the 2FA challenge manually and press Enter to continue...")
-        input("🔐 Press Enter after completing 2FA...")
-        return True
-    
     # Check for Google Cloud Console first-time setup (country selection + terms)
-    print("🔍 Checking for Google Cloud Console first-time setup modal...")
-    time.sleep(random.uniform(2.0, 4.0))  # Wait for any modals to appear
-    
-    # Check for the country selection and terms modal that appears for new accounts
-    try:
-        # Look for modal dialog indicators
-        modal_selectors = [
-            ".mat-mdc-dialog-content",
-            "[role='dialog']",
-            ".cdk-overlay-container",
-            ".mat-dialog-container",
-            "mat-dialog-container"
-        ]
-        
-        cloud_console_modal_found = False
-        modal_element = None
-        
-        for selector in modal_selectors:
-            try:
-                modal_elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                for element in modal_elements:
-                    if element.is_displayed():
-                        modal_text = element.text.lower()
-                        # Check for Google Cloud Console specific indicators
-                        cloud_indicators = [
-                            "welcome" in modal_text and "google cloud" in modal_text,
-                            "country" in modal_text and "create and manage" in modal_text,
-                            "terms of service" in modal_text and "google cloud" in modal_text,
-                            "select your country" in modal_text,
-                            "google cloud console" in modal_text,
-                            "create and manage projects" in modal_text
-                        ]
-                        
-                        if any(cloud_indicators):
-                            print("🎯 Google Cloud Console first-time setup modal detected!")
-                            print(f"📝 Modal content preview: {modal_text[:200]}...")
-                            cloud_console_modal_found = True
-                            modal_element = element
-                            break
-                
-                if cloud_console_modal_found:
-                    break
-                    
-            except Exception as selector_error:
-                continue
-        
-        if cloud_console_modal_found:
-            print("🏁 Handling Google Cloud Console first-time setup...")
-            
-            # Handle country selection dropdown in the modal
-            print("🌍 Looking for country selection dropdown in modal...")
-            time.sleep(random.uniform(1.0, 2.0))
-            
-            # Country dropdown selectors for Google Cloud Console modal
-            country_dropdown_selectors = [
-                ".mat-mdc-select-trigger",
-                ".mat-select-trigger", 
-                "[role='combobox']",
-                "mat-select[formcontrolname='country']",
-                ".mat-mdc-form-field-type-mat-select",
-                "cfc-select",
-                ".cfc-select"
-            ]
-            
-            country_dropdown = None
-            for selector in country_dropdown_selectors:
-                try:
-                    dropdowns = driver.find_elements(By.CSS_SELECTOR, selector)
-                    for dropdown in dropdowns:
-                        if dropdown.is_displayed():
-                            country_dropdown = dropdown
-                            print(f"✅ Found country dropdown with selector: {selector}")
-                            break
-                    if country_dropdown:
-                        break
-                except Exception:
-                    continue
-            
-            if country_dropdown:
-                # Click to open the dropdown
-                print("🖱️ Clicking country dropdown...")
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", country_dropdown)
-                time.sleep(random.uniform(0.5, 1.0))
-                human_mouse_move_to(country_dropdown)
-                country_dropdown.click()
-                time.sleep(random.uniform(1.0, 2.0))
-                
-                # Look for Austria in the dropdown options
-                print("🔍 Looking for Austria in country options...")
-                austria_selectors = [
-                    "//mat-option[contains(.//span, 'Austria')]",
-                    "//mat-option[contains(text(), 'Austria')]",
-                    "//div[contains(@class, 'mat-option') and contains(text(), 'Austria')]",
-                    "//span[contains(text(), 'Austria')]//parent::mat-option",
-                    "//*[contains(text(), 'Austria') and contains(@class, 'mat-option')]",
-                    "//cfc-option[contains(text(), 'Austria')]"
-                ]
-                
-                austria_option = None
-                for selector in austria_selectors:
-                    try:
-                        austria_option = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, selector)))
-                        print(f"✅ Found Austria option with selector: {selector}")
-                        break
-                    except TimeoutException:
-                        continue
-                
-                if austria_option:
-                    print("🇦🇹 Selecting Austria...")
-                    driver.execute_script("arguments[0].click();", austria_option)
-                    time.sleep(random.uniform(0.5, 1.0))
-                    print("✅ Austria selected successfully!")
-                else:
-                    print("⚠️ Could not find Austria option, using default selection...")
-            else:
-                print("⚠️ Could not find country dropdown in modal")
-            
-            # Look for and check the Terms of Service agreement checkbox
-            print("☑️ Looking for Terms of Service agreement checkbox...")
-            time.sleep(random.uniform(1.0, 2.0))
-            
-            checkbox_selectors = [
-                "input[type='checkbox']",
-                ".mat-mdc-checkbox-input", 
-                ".mdc-checkbox__native-control",
-                "mat-checkbox input",
-                "#mat-mdc-checkbox-1-input",
-                "input[id*='checkbox']"
-            ]
-            
-            agreement_checkbox = None
-            for selector in checkbox_selectors:
-                try:
-                    checkboxes = driver.find_elements(By.CSS_SELECTOR, selector)
-                    for checkbox in checkboxes:
-                        if checkbox.is_displayed() and checkbox.is_enabled():
-                            # Check if this checkbox is related to terms/agreement
-                            parent_text = ""
-                            try:
-                                parent = checkbox.find_element(By.XPATH, "../..")
-                                parent_text = parent.text.lower()
-                            except:
-                                pass
-                            
-                            if any(term in parent_text for term in ["agree", "terms", "accept", "consent"]):
-                                agreement_checkbox = checkbox
-                                print(f"✅ Found agreement checkbox with selector: {selector}")
-                                break
-                    if agreement_checkbox:
-                        break
-                except Exception:
-                    continue
-            
-            if agreement_checkbox:
-                # Check if checkbox is already checked
-                is_checked = agreement_checkbox.is_selected()
-                if not is_checked:
-                    print("☑️ Checking Terms of Service agreement...")
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", agreement_checkbox)
-                    time.sleep(random.uniform(0.5, 1.0))
-                    human_mouse_move_to(agreement_checkbox)
-                    agreement_checkbox.click()
-                    time.sleep(random.uniform(0.5, 1.0))
-                    print("✅ Terms of Service agreement checked!")
-                else:
-                    print("✅ Terms of Service agreement already checked!")
-            else:
-                print("⚠️ Could not find Terms of Service agreement checkbox")
-            
-            # Look for and click the Continue/Accept button in the modal
-            print("➡️ Looking for Continue/Accept button in modal...")
-            time.sleep(random.uniform(1.0, 2.0))
-            
-            continue_selectors = [
-                "//button[contains(.//span, 'Continue')]",
-                "//button[contains(.//span, 'Accept')]", 
-                "//button[contains(.//span, 'Agree')]",
-                "//button[contains(.//span, 'Get started')]",
-                "//span[contains(text(), 'Continue')]//parent::button",
-                "//span[contains(text(), 'Accept')]//parent::button",
-                ".mat-primary button",
-                "button[type='submit']",
-                ".mdc-button--unelevated"
-            ]
-            
-            continue_button = None
-            for selector in continue_selectors:
-                try:
-                    if selector.startswith("//"):
-                        buttons = driver.find_elements(By.XPATH, selector)
-                    else:
-                        buttons = driver.find_elements(By.CSS_SELECTOR, selector)
-                    
-                    for button in buttons:
-                        if button.is_displayed() and button.is_enabled():
-                            continue_button = button
-                            print(f"✅ Found continue button with selector: {selector}")
-                            break
-                    if continue_button:
-                        break
-                except Exception:
-                    continue
-            
-            if continue_button:
-                print("✅ Clicking Continue/Accept button...")
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", continue_button)
-                time.sleep(random.uniform(0.5, 1.0))
-                human_mouse_move_to(continue_button)
-                continue_button.click()
-                time.sleep(random.uniform(2.0, 4.0))  # Wait for modal to close and page to load
-                print("✅ Google Cloud Console first-time setup completed!")
-            else:
-                print("⚠️ Could not find Continue/Accept button, trying to close modal...")
-                # Try pressing Escape to close modal
-                try:
-                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-                    time.sleep(random.uniform(1.0, 2.0))
-                    print("✅ Closed modal with Escape key")
-                except:
-                    print("⚠️ Could not close modal")
-                    
-        else:
-            print("✅ No Google Cloud Console first-time setup modal detected")
-            
-    except Exception as cloud_setup_error:
-        print(f"⚠️ Error handling Google Cloud Console first-time setup: {cloud_setup_error}")
-        print("💡 Continuing with automation...")
+    print("🔍 Checking for Google Cloud Console first-time setup...")
+    handle_google_console_first_time_setup(driver)
 
     # Additional check for Google Play Console Terms of Service (legacy/alternative flow)
     print("🔍 Checking for Google Play Console Terms of Service...")
@@ -6559,6 +7231,63 @@ try:
             time.sleep(random.uniform(3.0, 5.0))  # Reduced from previous long wait
 
     print("✅ Login attempt completed successfully!")
+    
+    # CRITICAL: Check specifically for Google Recovery Options page that appears for new Gmail accounts
+    current_url = driver.current_url
+    print(f"📍 Current URL after login: {current_url}")
+    
+    if "gds.google.com/web/recoveryoptions" in current_url:
+        print("📱 CRITICAL: Detected Google Recovery Options page after login!")
+        print("🚫 This page must be handled before proceeding to Cloud Console...")
+        
+        # Multiple attempts to handle recovery options
+        recovery_attempts = 3
+        recovery_handled = False
+        
+        for attempt in range(recovery_attempts):
+            print(f"📱 Recovery options handling attempt {attempt + 1}/{recovery_attempts}")
+            
+            # First dismiss any overlays
+            dismiss_overlay(driver)
+            time.sleep(1)
+            
+            # Try to handle recovery options
+            recovery_result = handle_google_recovery_options(driver)
+            
+            # Check if we successfully left the recovery page
+            new_url = driver.current_url
+            if "gds.google.com/web/recoveryoptions" not in new_url:
+                print(f"✅ Successfully left recovery options page! Now at: {new_url}")
+                recovery_handled = True
+                break
+            else:
+                print(f"⚠️ Still on recovery options page after attempt {attempt + 1}")
+                time.sleep(random.uniform(2.0, 3.0))
+        
+        if not recovery_handled:
+            print("⚠️ Could not automatically handle recovery options after multiple attempts")
+            print("🔧 Attempting manual guidance approach...")
+            
+            # Try direct navigation as last resort
+            print("🔗 Trying direct navigation to Cloud Console as final attempt...")
+            try:
+                driver.get("https://console.cloud.google.com/")
+                time.sleep(random.uniform(4.0, 6.0))
+                final_url = driver.current_url
+                if "console.cloud.google.com" in final_url:
+                    print(f"✅ Direct navigation successful: {final_url}")
+                    recovery_handled = True
+                else:
+                    print(f"⚠️ Direct navigation failed, still at: {final_url}")
+            except Exception as direct_nav_error:
+                print(f"❌ Direct navigation error: {direct_nav_error}")
+        
+        if recovery_handled:
+            print("✅ Recovery options page successfully handled!")
+            time.sleep(random.uniform(2.0, 3.0))
+        else:
+            print("⚠️ Recovery options handling incomplete - continuing with caution...")
+    
     print("🔍 Verifying Cloud Console access...")
     
     # Final verification that we're on Cloud Console
@@ -7049,6 +7778,59 @@ try:
 
     # Step 5: Create new project using direct approach
     print("🆕 Creating new project...")
+    
+    # CRITICAL: Final check for recovery options before project creation
+    current_url_before_project = driver.current_url
+    print(f"📍 URL before project creation: {current_url_before_project}")
+    
+    if "gds.google.com/web/recoveryoptions" in current_url_before_project:
+        print("🚨 CRITICAL: Still on recovery options page before project creation!")
+        print("📱 Must handle recovery options first...")
+        
+        # Force handle recovery options with aggressive approach
+        print("🔧 Using aggressive recovery options handling...")
+        
+        # Try multiple escape methods
+        escape_methods = [
+            ("Direct Cloud Console navigation", lambda: driver.get("https://console.cloud.google.com/")),
+            ("Home page navigation", lambda: driver.get("https://console.cloud.google.com/home")),
+            ("Project selector navigation", lambda: driver.get("https://console.cloud.google.com/projectselector")),
+            ("Escape key press", lambda: driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE))
+        ]
+        
+        recovery_escaped = False
+        for method_name, method_func in escape_methods:
+            try:
+                print(f"🔧 Trying: {method_name}")
+                method_func()
+                time.sleep(random.uniform(3.0, 5.0))
+                
+                new_url = driver.current_url
+                if "gds.google.com/web/recoveryoptions" not in new_url:
+                    print(f"✅ {method_name} successful! Now at: {new_url}")
+                    recovery_escaped = True
+                    break
+                else:
+                    print(f"⚠️ {method_name} failed, still on recovery page")
+            except Exception as method_error:
+                print(f"❌ {method_name} error: {method_error}")
+                continue
+        
+        if not recovery_escaped:
+            print("⚠️ Could not escape recovery options automatically")
+            print("💡 Manual intervention may be required")
+        else:
+            print("✅ Successfully escaped recovery options page!")
+            time.sleep(random.uniform(2.0, 3.0))
+    
+    # Ensure we're ready for project creation
+    print("🔍 Final readiness check for project creation...")
+    
+    # Dismiss any remaining overlays before project creation
+    print("🚫 Clearing any overlays before project creation...")
+    dismiss_overlay(driver)
+    time.sleep(1)
+    
     print("🚀 STRATEGY: Direct navigation to project creation page")
     
     # Primary approach: Direct navigation to project creation page
@@ -7061,6 +7843,13 @@ try:
         # Wait for page to load
         print("⏳ Waiting for project creation page to load...")
         time.sleep(random.uniform(3.0, 5.0))
+        
+        # CRITICAL: Check for first-time Google Console setup immediately after navigation
+        print("🎯 PRIORITY: Checking for first-time Google Console setup (country selection & agreement)...")
+        first_time_handled = handle_google_console_first_time_setup(driver)
+        if first_time_handled:
+            print("✅ First-time setup completed successfully!")
+            time.sleep(random.uniform(2.0, 4.0))  # Give extra time after setup
         
         # Check for CAPTCHA or verification
         if not wait_for_page_load_and_check_captcha(driver):
@@ -7096,6 +7885,9 @@ try:
     # Step 6: Fill project name
     print("📝 Filling project name...")
     try:
+        # Dismiss any overlays before trying to fill project name
+        dismiss_overlay(driver)
+        
         # Try multiple selectors for project name input
         name_selectors = [
             "#p6ntest-name-input",
@@ -7131,21 +7923,22 @@ try:
             driver.execute_script("arguments[0].scrollIntoView(true);", project_name_input)
             time.sleep(random.uniform(0.5, 1.0))
             
-            # Click to focus
-            human_mouse_move_to(project_name_input)
-            project_name_input.click()
-            time.sleep(random.uniform(0.5, 1.0))
-            
-            # Clear any existing text using multiple methods
-            project_name_input.clear()
-            project_name_input.send_keys(Keys.CONTROL + "a")  # Select all
-            project_name_input.send_keys(Keys.DELETE)  # Delete
-            time.sleep(random.uniform(0.3, 0.7))
-            
-            # Type the project name
-            human_typing(project_name_input, PROJECT_NAME)
-            print("✅ Project name filled successfully!")
-            time.sleep(random.uniform(1.0, 2.0))
+            # Use safe_click to handle any overlays that might intercept the click
+            if safe_click(driver, project_name_input, "project name input"):
+                time.sleep(random.uniform(0.5, 1.0))
+                
+                # Clear any existing text using multiple methods
+                project_name_input.clear()
+                project_name_input.send_keys(Keys.CONTROL + "a")  # Select all
+                project_name_input.send_keys(Keys.DELETE)  # Delete
+                time.sleep(random.uniform(0.3, 0.7))
+                
+                # Type the project name
+                human_typing(project_name_input, PROJECT_NAME)
+                print("✅ Project name filled successfully!")
+                time.sleep(random.uniform(1.0, 2.0))
+            else:
+                print("❌ Could not click project name input field due to overlay")
         else:
             print("❌ Could not find project name input field")
             
@@ -7155,112 +7948,108 @@ try:
     # Step 7: Click create button
     print("🚀 Clicking create button...")
     try:
-                create_btn_xpath = "/html/body/div[1]/div[3]/div[3]/div/pan-shell/pcc-shell/cfc-panel-container/div/div/cfc-panel/div/div/div[3]/cfc-panel-container/div/div/cfc-panel/div/div/cfc-panel-container/div/div/cfc-panel/div/div/cfc-panel-container/div/div/cfc-panel[2]/div/div/central-page-area/div/div/pcc-content-viewport/div/div/ng2-router-root/div/cfc-router-outlet/div/ng-component/cfc-single-panel-layout/cfc-panel-container/div/div/cfc-panel/div/div/div/cfc-panel-body/cfc-virtual-viewport/div[1]/div/proj-creation-form/form/button[1]/span[2]"
+        # Dismiss any overlays before clicking create button
+        dismiss_overlay(driver)
+        
+        create_btn_xpath = "/html/body/div[1]/div[3]/div[3]/div/pan-shell/pcc-shell/cfc-panel-container/div/div/cfc-panel/div/div/div[3]/cfc-panel-container/div/div/cfc-panel/div/div/cfc-panel-container/div/div/cfc-panel/div/div/cfc-panel-container/div/div/cfc-panel[2]/div/div/central-page-area/div/div/pcc-content-viewport/div/div/ng2-router-root/div/cfc-router-outlet/div/ng-component/cfc-single-panel-layout/cfc-panel-container/div/div/cfc-panel/div/div/div/cfc-panel-body/cfc-virtual-viewport/div[1]/div/proj-creation-form/form/button[1]/span[2]"
+        
+        # Also try alternative selectors
+        create_selectors = [
+            create_btn_xpath,
+            "button[type='submit']",
+            "button:contains('Create')",
+            "button:contains('CREATE')",
+            "form button:first-child"
+        ]
+        
+        create_btn = None
+        for selector in create_selectors:
+            try:
+                if selector == create_btn_xpath:
+                    create_btn = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                else:
+                    create_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                print(f"✅ Found create button with selector: {selector}")
+                break
+            except TimeoutException:
+                continue
+        
+        if create_btn:
+            # Scroll to button and use safe_click to handle overlays
+            driver.execute_script("arguments[0].scrollIntoView(true);", create_btn)
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            if safe_click(driver, create_btn, "Create button"):
+                time.sleep(random.uniform(3.0, 5.0))
+                print("✅ Project creation initiated!")
+                print_milestone_timing("🆕 PROJECT CREATION STARTED")
                 
-                # Also try alternative selectors
-                create_selectors = [
-                    create_btn_xpath,
-                    "button[type='submit']",
-                    "button:contains('Create')",
-                    "button:contains('CREATE')",
-                    "form button:first-child"
-                ]
+                # Step 9: Wait for project creation to complete and select the project
+                print("⏳ Waiting for project creation to complete...")
+                time.sleep(random.uniform(15.0, 20.0))  # Wait longer for project to be created
                 
-                create_btn = None
-                for selector in create_selectors:
+                print("🔍 Selecting the newly created project...")
+                
+                # Function to open project picker
+                def open_project_picker():
+                    picker_opened = False
+                    
+                    # Method 1: Try keyboard shortcut first (Ctrl+O)
+                    print("⌨️ Trying keyboard shortcut (Ctrl+O)...")
+                    pyautogui.hotkey('ctrl', 'o')
+                    time.sleep(random.uniform(3.0, 4.0))
+                    
+                    # Check if picker opened by looking for modal or dropdown
                     try:
-                        if selector == create_btn_xpath:
-                            create_btn = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                        else:
-                            create_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                        print(f"✅ Found create button with selector: {selector}")
-                        break
-                    except TimeoutException:
-                        continue
-                
-                if create_btn:
-                    try:
-                        driver.execute_script("arguments[0].scrollIntoView(true);", create_btn)
-                        time.sleep(random.uniform(1.0, 2.0))
-                        human_mouse_move_to(create_btn)
-                        create_btn.click()
-                        print("✅ Create button clicked successfully!")
-                    except Exception as create_click_error:
-                        print(f"⚠️ Regular click failed: {create_click_error}")
-                        print("🔄 Trying JavaScript click...")
-                        driver.execute_script("arguments[0].click();", create_btn)
-                        print("✅ Create button clicked with JavaScript!")
-                        
-                    time.sleep(random.uniform(3.0, 5.0))
-                    print("✅ Project creation initiated!")
-                    print_milestone_timing("🆕 PROJECT CREATION STARTED")
+                        # Look for project picker modal or dropdown
+                        picker_modal = driver.find_element(By.CSS_SELECTOR, "[role='dialog'], .cdk-overlay-container, .mat-select-panel")
+                        if picker_modal and picker_modal.is_displayed():
+                            print("✅ Project picker opened with keyboard shortcut!")
+                            picker_opened = True
+                    except:
+                        pass
                     
-                    # Step 9: Wait for project creation to complete and select the project
-                    print("⏳ Waiting for project creation to complete...")
-                    time.sleep(random.uniform(15.0, 20.0))  # Wait longer for project to be created
-                    
-                    print("🔍 Selecting the newly created project...")
-                    
-                    # Function to open project picker
-                    def open_project_picker():
-                        picker_opened = False
+                    # Method 2: If keyboard shortcut didn't work, try clicking the project picker button
+                    if not picker_opened:
+                        print("⚠️ Keyboard shortcut didn't work, trying button click...")
                         
-                        # Method 1: Try keyboard shortcut first (Ctrl+O)
-                        print("⌨️ Trying keyboard shortcut (Ctrl+O)...")
-                        pyautogui.hotkey('ctrl', 'o')
-                        time.sleep(random.uniform(3.0, 4.0))
+                        project_picker_selectors = [
+                            "#ocb-platform-bar > cfc-platform-bar > div > div.cfc-platform-bar-left > div > div > div > pcc-platform-bar-purview-switcher > pcc-purview-switcher > cfc-switcher-button > button > span.mdc-button__label > span > span",
+                            "#ocb-platform-bar > cfc-platform-bar > div > div.cfc-platform-bar-left > div > div > div > pcc-platform-bar-purview-switcher > pcc-purview-switcher > cfc-switcher-button > button",
+                            "pcc-purview-switcher cfc-switcher-button button",
+                            "cfc-switcher-button button",
+                            "[aria-label*='project']",
+                            "[aria-label*='Project']"
+                        ]
                         
-                        # Check if picker opened by looking for modal or dropdown
-                        try:
-                            # Look for project picker modal or dropdown
-                            picker_modal = driver.find_element(By.CSS_SELECTOR, "[role='dialog'], .cdk-overlay-container, .mat-select-panel")
-                            if picker_modal and picker_modal.is_displayed():
-                                print("✅ Project picker opened with keyboard shortcut!")
+                        picker_btn = None
+                        for selector in project_picker_selectors:
+                            try:
+                                picker_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                                print(f"✅ Found project picker button with selector: {selector}")
+                                break
+                            except TimeoutException:
+                                continue
+                        
+                        if picker_btn:
+                            try:
+                                driver.execute_script("arguments[0].scrollIntoView(true);", picker_btn)
+                                time.sleep(random.uniform(1.0, 2.0))
+                                human_mouse_move_to(picker_btn)
+                                picker_btn.click()
+                                print("✅ Project picker button clicked!")
+                                time.sleep(random.uniform(3.0, 4.0))
                                 picker_opened = True
-                        except:
-                            pass
-                        
-                        # Method 2: If keyboard shortcut didn't work, try clicking the project picker button
-                        if not picker_opened:
-                            print("⚠️ Keyboard shortcut didn't work, trying button click...")
-                            
-                            project_picker_selectors = [
-                                "#ocb-platform-bar > cfc-platform-bar > div > div.cfc-platform-bar-left > div > div > div > pcc-platform-bar-purview-switcher > pcc-purview-switcher > cfc-switcher-button > button > span.mdc-button__label > span > span",
-                                "#ocb-platform-bar > cfc-platform-bar > div > div.cfc-platform-bar-left > div > div > div > pcc-platform-bar-purview-switcher > pcc-purview-switcher > cfc-switcher-button > button",
-                                "pcc-purview-switcher cfc-switcher-button button",
-                                "cfc-switcher-button button",
-                                "[aria-label*='project']",
-                                "[aria-label*='Project']"
-                            ]
-                            
-                            picker_btn = None
-                            for selector in project_picker_selectors:
-                                try:
-                                    picker_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                                    print(f"✅ Found project picker button with selector: {selector}")
-                                    break
-                                except TimeoutException:
-                                    continue
-                            
-                            if picker_btn:
-                                try:
-                                    driver.execute_script("arguments[0].scrollIntoView(true);", picker_btn)
-                                    time.sleep(random.uniform(1.0, 2.0))
-                                    human_mouse_move_to(picker_btn)
-                                    picker_btn.click()
-                                    print("✅ Project picker button clicked!")
-                                    time.sleep(random.uniform(3.0, 4.0))
-                                    picker_opened = True
-                                    
-                                except Exception as picker_click_error:
-                                    print(f"⚠️ Regular click failed: {picker_click_error}")
-                                    print("🔄 Trying JavaScript click...")
-                                    driver.execute_script("arguments[0].click();", picker_btn)
-                                    print("✅ Project picker opened with JavaScript!")
-                                    time.sleep(random.uniform(3.0, 4.0))
-                                    picker_opened = True
-                        
-                        return picker_opened
+                                
+                            except Exception as picker_click_error:
+                                print(f"⚠️ Regular click failed: {picker_click_error}")
+                                print("🔄 Trying JavaScript click...")
+                                driver.execute_script("arguments[0].click();", picker_btn)
+                                print("✅ Project picker opened with JavaScript!")
+                                time.sleep(random.uniform(3.0, 4.0))
+                                picker_opened = True
+                    
+                    return picker_opened
                     
                     # Function to find and select project
                     def select_project():
@@ -7682,6 +8471,11 @@ try:
                                             current_url = driver.current_url
                                             print(f"📍 Current OAuth page URL after navigation: {current_url}")
                                         
+                                        # CRITICAL: Dismiss OAuth navigation tutorial regardless of how we got here
+                                        print("🚫 Preemptively dismissing any OAuth navigation tutorial overlays...")
+                                        dismiss_oauth_overview_navigation_tutorial(driver)
+                                        time.sleep(2)  # Wait for tutorial dismissal
+                                        
                                         # Look for "Get started" button on OAuth overview page
                                         print("🔍 Checking for OAuth overview page with 'Get started' button...")
                                         
@@ -7700,6 +8494,21 @@ try:
                                         
                                         if is_overview_page:
                                             print("✅ Detected OAuth overview page (new Gmail account)")
+                                            
+                                            # PRIORITY: Dismiss specific OAuth navigation tutorial blocking elements
+                                            print("🚫 Dismissing OAuth overview navigation tutorial blocking elements...")
+                                            oauth_tutorial_dismissed = dismiss_oauth_overview_navigation_tutorial(driver)
+                                            
+                                            if oauth_tutorial_dismissed:
+                                                print("✅ OAuth overview tutorial successfully dismissed")
+                                            else:
+                                                print("⚠️ OAuth overview tutorial dismissal may be incomplete")
+                                                # Fallback to generic dismissal
+                                                print("🔄 Trying generic navigation tutorial dismissal as fallback...")
+                                                dismiss_navigation_tutorial(driver)
+                                            
+                                            time.sleep(2)  # Wait after dismissing overlay
+                                            
                                             print("🔍 Looking for 'Get started' button...")
                                             
                                             # Look for the "Get started" button with multiple selectors
@@ -7870,6 +8679,13 @@ try:
                                                 
                                                 print("✅ OAuth consent screen configuration page loaded!")
                                                 print("📝 Starting OAuth consent screen App Information configuration...")
+                                                
+                                                # CRITICAL: Additional first-time setup check before OAuth configuration
+                                                print("🎯 PRIORITY: Final check for first-time setup before OAuth configuration...")
+                                                final_setup_handled = handle_google_console_first_time_setup(driver)
+                                                if final_setup_handled:
+                                                    print("✅ Final first-time setup check completed!")
+                                                    time.sleep(random.uniform(2.0, 3.0))
                                                 
                                                 # Step 12: Fill App Information form
                                                 print("📝 Filling App Information form...")
@@ -8963,6 +9779,12 @@ try:
                                                 
                                                 # Step 17: Navigate to Data Access and configure scopes
                                                 print("📊 Proceeding to Data Access configuration...")
+                                                
+                                                # CRITICAL: Dismiss navigation tutorial overlay before Data Access interactions
+                                                print("🎯 PRIORITY: Dismissing navigation tutorial overlay before Data Access configuration...")
+                                                dismiss_navigation_tutorial(driver)
+                                                time.sleep(2.0)  # Give extra time for dismissal
+                                                
                                                 time.sleep(random.uniform(3.0, 5.0))
                                                 
                                                 # Click "Data Access" from sidebar
@@ -9021,6 +9843,12 @@ try:
                                                 
                                                 # Click "Add or remove scopes" button
                                                 print("🔧 Clicking 'Add or remove scopes' button...")
+                                                
+                                                # CRITICAL: Dismiss navigation tutorial overlay before scopes button click
+                                                print("🎯 PRIORITY: Dismissing navigation tutorial overlay before scopes interaction...")
+                                                dismiss_navigation_tutorial(driver)
+                                                time.sleep(1.0)  # Wait for dismissal
+                                                
                                                 try:
                                                     time.sleep(random.uniform(2.0, 4.0))
                                                     
@@ -9536,8 +10364,8 @@ try:
                         print("💡 You may need to manually select the project from the picker")
                         print(f"💡 Look for project name: {PROJECT_NAME}")
                     
-                else:
-                    print("❌ Could not find create button")
+            else:
+                print("❌ Could not find create button")
                     
     except Exception as create_error:
         print(f"❌ Error clicking create button: {create_error}")
