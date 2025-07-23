@@ -1185,16 +1185,22 @@ psutil>=5.9.0
             return 2  # Default to partial success if we can't verify
     
     def cleanup_chrome_processes(self, worker_id: int):
-        """Clean up any hanging Chrome processes for this worker"""
+        """Clean up any hanging Chrome processes for this worker while preserving others"""
         try:
             import psutil
             
+            debug_port = 9222 + worker_id  # Each worker has its unique debug port
             chrome_processes = []
+            
+            # Only look for Chrome processes with this worker's specific identifiers
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
                     if 'chrome' in proc.info['name'].lower():
                         cmdline = ' '.join(proc.info['cmdline']) if proc.info['cmdline'] else ''
-                        if f'worker_{worker_id}' in cmdline or f'instance_' in cmdline:
+                        # Only match processes that have this worker's specific identifiers
+                        if (f'--remote-debugging-port={debug_port}' in cmdline or
+                            f'worker_{worker_id}' in cmdline or
+                            f'chrome_profile_instance_{worker_id}' in cmdline):
                             chrome_processes.append(proc)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
@@ -1227,25 +1233,26 @@ psutil>=5.9.0
             import psutil
             chrome_processes = []
             
-            # Find all Chrome-related processes for this worker
+            # Find all Chrome-related processes for this specific worker only
+            worker_port = 9222 + worker_id
             for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
                 try:
                     proc_info = proc.info
                     if not proc_info['name']:
                         continue
                         
-                    # Comprehensive Chrome process detection
+                    # Comprehensive Chrome process detection for this worker only
                     chrome_indicators = ['chrome', 'chromium', 'msedge', 'brave']
                     is_chrome = any(indicator in proc_info['name'].lower() for indicator in chrome_indicators)
                     
                     if is_chrome and proc_info['cmdline']:
                         cmdline = ' '.join(proc_info['cmdline']).lower()
                         
-                        # Check if this Chrome process belongs to our worker
+                        # Strictly check if this Chrome process belongs to our specific worker
                         worker_indicators = [
-                            f'worker_{worker_id}',
-                            f'chrome_profile_instance_',
-                            f'chrome_data_{worker_id}',
+                            f'--remote-debugging-port={worker_port}',  # Worker's unique debug port
+                            f'--user-data-dir=.*worker_{worker_id}\\\\chrome_profile',  # Worker's specific profile
+                            f'chrome_profile_instance_.*_worker_{worker_id}',  # Worker's instance profile
                             f'user-data-dir.*worker_{worker_id}',
                             f'remote-debugging-port={9222 + worker_id}',
                             f'remote-debugging-port={10222 + worker_id}'
@@ -1258,12 +1265,18 @@ psutil>=5.9.0
                     continue
             
             if chrome_processes:
-                logger.info(f"Worker {worker_id}: Found {len(chrome_processes)} Chrome processes to cleanup")
+                logger.info(f"Worker {worker_id}: Found {len(chrome_processes)} Chrome processes to cleanup for this specific worker")
                 
-                # Phase 1: Graceful termination
+                # Phase 1: Verify each process belongs to this worker before termination
                 for proc in chrome_processes:
                     try:
-                        logger.info(f"Worker {worker_id}: Gracefully terminating Chrome PID {proc.pid}")
+                        # Double check process belongs to this worker
+                        cmdline = ' '.join(proc.cmdline()) if proc.cmdline() else ''
+                        if f'--remote-debugging-port={worker_port}' not in cmdline:
+                            logger.info(f"Worker {worker_id}: Skipping process {proc.pid} - not specific to this worker")
+                            continue
+                            
+                        logger.info(f"Worker {worker_id}: Gracefully terminating Chrome PID {proc.pid} (port {worker_port})")
                         proc.terminate()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
@@ -2079,19 +2092,21 @@ STDERR OUTPUT:
             logger.info("📊 [POOL-SUMMARY] No accounts processed yet - workers initializing...")
     
     def run_automation(self):
-        """Run automation with dynamic worker rotation - immediately move to next account when one completes"""
+        """Run automation with independent worker handling - failures don't affect other workers"""
         if not self.accounts:
             logger.error("No accounts loaded!")
             return False
         
-        # Enhanced startup display
+        # Enhanced startup display with failure handling info
         print("\n" + "🚀" * 30)
-        print("🚀 DYNAMIC WORKER ROTATION AUTOMATION STARTING")
+        print("🚀 RESILIENT WORKER AUTOMATION STARTING")
         print("🚀" * 30)
         print(f"📊 Accounts to process: {len(self.accounts)}")
-        print(f"⚙️  Worker pool: {self.max_workers} workers with immediate rotation")
-        print(f"🎯 Dynamic features:")
-        print(f"   • ⚡ Immediate worker rotation when account completes/fails")
+        print(f"⚙️  Worker pool: {self.max_workers} independent workers")
+        print(f"🛡️  Resilient features:")
+        print(f"   • ⚡ Workers operate independently")
+        print(f"   • 🛡️  Worker failures don't affect others")
+        print(f"   • 🔄 Failed workers are cleaned up individually")
         print(f"   • 🔄 Continuous processing - no waiting for other workers")
         print(f"   • 📈 Real-time queue management and load balancing")
         print(f"   • 🚀 Maximum throughput with optimal resource utilization")
